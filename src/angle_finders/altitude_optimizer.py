@@ -78,3 +78,30 @@ def get_general_altitude(P: Polygon, theta: float) -> float:
 
     # Step 10
     return abs(alpha)
+
+
+import math
+
+
+def find_optimal_angle(polygon: Polygon):
+    best_angle = 0.0
+    min_altitude = float('inf')
+
+    coords = list(polygon.exterior.coords)
+
+    for i in range(len(coords) - 1):
+        x1, y1 = coords[i]
+        x2, y2 = coords[i + 1]
+        dx, dy = x2 - x1, y2 - y1
+        side_angle = math.atan2(dy, dx)
+        cur_angle = side_angle + math.pi / 2
+
+        cur_angle = cur_angle % math.pi
+
+        altitude = get_general_altitude(polygon, cur_angle)
+
+        if altitude < min_altitude:
+            min_altitude = altitude
+            best_angle = cur_angle
+
+    return best_angle
