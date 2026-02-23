@@ -61,12 +61,10 @@ class MissionOptimizer:
         ]
         _, _, obstacle_positions = self.field_decomp.to_darp_grid()
 
-        not_equal = not all(abs(p - portions[0]) < 1e-6 for p in portions)
-
         darp = DARP(
             nx=self.grid_rows,
             ny=self.grid_cols,
-            notEqualPortions=not_equal,
+            notEqualPortions=True,
             given_initial_positions=grid_positions,
             given_portions=portions,
             obstacles_positions=obstacle_positions,
