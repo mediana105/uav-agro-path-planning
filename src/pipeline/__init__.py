@@ -1,6 +1,6 @@
 from .drone_config import DroneConfig
 from .mission_result import MissionResult, ZoneResult
-from .optimizer import MissionOptimizer
+from .pipeline import MissionOptimizer
 
 __all__ = [
     'DroneConfig',

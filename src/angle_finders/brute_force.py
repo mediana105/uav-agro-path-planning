@@ -1,12 +1,12 @@
-from path_planning.boustrophedon import generate_snake_simple, path_length
+from ..path_planning.boustrophedon import generate_snake_simple, path_length
 
 
 def find_angle_by_bruteforce(
-    polygon,
-    swath,
-    step_deg=5.0,
-    angle_min=0.0,
-    angle_max=180.0,
+        polygon,
+        swath,
+        step_deg=5.0,
+        angle_min=0.0,
+        angle_max=180.0,
 ):
     best_angle = None
     best_cost = float("inf")
