@@ -1,135 +1,128 @@
 import math
+
 from shapely.affinity import rotate
 from shapely.geometry import LineString
 
+_NAN = (float("nan"), float("nan"))
 
-def generate_snake_simple(polygon, angle, swath):
-    """
-    Generate snake (boustrophedon) coverage path for a polygon.
-    Handles connected but possibly concave polygons from DARP decomposition.
 
-    Args:
-        polygon: Shapely polygon to cover
-        angle: Coverage angle in degrees
-        swath: Width of coverage swath (meters)
-
-    Returns:
-        List of (x, y) waypoints
-    """
+def generate_snake_simple(polygon, angle, swath, start_position=None):
     rotated = rotate(polygon, -angle, origin="centroid")
     min_x, min_y, max_x, max_y = rotated.bounds
 
-    path = []
+    columns = []
     x = min_x
-    go_down = True
-
     while x < max_x:
         line = LineString([(x, min_y - 1), (x, max_y + 1)])
-        segment = line.intersection(rotated)
-
-        if segment.is_empty:
-            x += swath
-            continue
-
-        # Extract points based on geometry type
-        points = _extract_segment_points(segment)
-
-        if not points:
-            x += swath
-            continue
-
-        # Reverse direction for alternating passes
-        if not go_down:
-            points.reverse()
-
-        path.extend(points)
-        go_down = not go_down
+        intersection = line.intersection(rotated)
+        if not intersection.is_empty:
+            sub_segs = _extract_sub_segments(intersection)
+            if sub_segs:
+                columns.append(sub_segs)
         x += swath
 
-    # Rotate path back to original orientation
-    final_path = _rotate_path_back(path, polygon.centroid, angle)
+    if not columns:
+        return []
 
-    return final_path
+    rotated_start = _rotate_point(start_position, polygon.centroid, -angle)
+
+    first_x = columns[0][0][0][0]
+    last_x = columns[-1][0][0][0]
+    if abs(rotated_start[0] - last_x) < abs(rotated_start[0] - first_x):
+        columns.reverse()
+
+    go_up = True
+    if rotated_start is not None:
+        bottom_pt = columns[0][0][0]
+        top_pt = columns[0][-1][-1]
+        d_bot = math.hypot(bottom_pt[0] - rotated_start[0], bottom_pt[1] - rotated_start[1])
+        d_top = math.hypot(top_pt[0] - rotated_start[0], top_pt[1] - rotated_start[1])
+        go_up = d_bot <= d_top
+
+    path = []
+    for col in columns:
+        if go_up:
+            ordered = col
+        else:
+            ordered = [list(reversed(seg)) for seg in reversed(col)]
+
+        for k, seg_pts in enumerate(ordered):
+            if k > 0:
+                path.append(_NAN)
+            path.extend(seg_pts)
+
+        go_up = not go_up
+
+    return _rotate_path_back(path, polygon.centroid, angle)
 
 
-def _extract_segment_points(segment):
-    """
-    Extract ordered points from intersection segment.
+def _extract_sub_segments(segment):
+    geom_type = segment.geom_type
 
-    Args:
-        segment: Shapely geometry (LineString, MultiLineString, Point, etc.)
+    if geom_type == "LineString":
+        pts = sorted(segment.coords, key=lambda p: p[1])
+        return [pts] if pts else []
 
-    Returns:
-        List of (x, y) points sorted by Y coordinate
-    """
-    points = []
-
-    if segment.geom_type == 'LineString':
-        points = list(segment.coords)
-
-    elif segment.geom_type == 'MultiLineString':
-        # Collect all points from all segments
-        for seg in segment.geoms:
-            points.extend(list(seg.coords))
-        # Sort by Y to ensure correct traversal order
-        points.sort(key=lambda p: p[1])
-
-    elif segment.geom_type == 'Point':
-        points = [(segment.x, segment.y)]
-
-    elif segment.geom_type == 'GeometryCollection':
+    if geom_type == "MultiLineString":
+        result = []
         for geom in segment.geoms:
-            points.extend(_extract_segment_points(geom))
-        points.sort(key=lambda p: p[1])
+            pts = sorted(geom.coords, key=lambda p: p[1])
+            if pts:
+                result.append(pts)
+        result.sort(key=lambda s: s[0][1])
+        return result
 
-    return points
+    if geom_type == "Point":
+        return [[(segment.x, segment.y)]]
+
+    if geom_type == "GeometryCollection":
+        result = []
+        for geom in segment.geoms:
+            result.extend(_extract_sub_segments(geom))
+        result.sort(key=lambda s: s[0][1])
+        return result
+
+    return []
+
+
+def _rotate_point(point, centroid, angle_deg):
+    rad = math.radians(angle_deg)
+    cos_a = math.cos(rad)
+    sin_a = math.sin(rad)
+    dx = point[0] - centroid.x
+    dy = point[1] - centroid.y
+    return (
+        centroid.x + cos_a * dx - sin_a * dy,
+        centroid.y + sin_a * dx + cos_a * dy,
+    )
 
 
 def _rotate_path_back(path, centroid, angle):
-    """
-    Rotate path back to original polygon orientation.
-
-    Args:
-        path: List of (x, y) points in rotated coordinates
-        centroid: Center point for rotation
-        angle: Original rotation angle in degrees
-
-    Returns:
-        List of (x, y) points in original coordinates
-    """
     rad = math.radians(angle)
     cos_a = math.cos(rad)
     sin_a = math.sin(rad)
-
-    final_path = []
+    result = []
     for px, py in path:
+        if math.isnan(px):
+            result.append(_NAN)
+            continue
         dx = px - centroid.x
         dy = py - centroid.y
-        final_path.append((
+        result.append((
             centroid.x + cos_a * dx - sin_a * dy,
-            centroid.y + sin_a * dx + cos_a * dy
+            centroid.y + sin_a * dx + cos_a * dy,
         ))
-
-    return final_path
+    return result
 
 
 def path_length(path):
-    """
-    Calculate total length of a path.
-
-    Args:
-        path: List of (x, y) waypoints
-
-    Returns:
-        float: Total path length
-    """
     if len(path) < 2:
-        return 0
-
-    total = 0
+        return 0.0
+    total = 0.0
     for i in range(len(path) - 1):
         x1, y1 = path[i]
         x2, y2 = path[i + 1]
+        if math.isnan(x1) or math.isnan(x2):
+            continue
         total += math.hypot(x2 - x1, y2 - y1)
-
     return total
