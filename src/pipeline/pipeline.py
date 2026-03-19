@@ -1,5 +1,5 @@
 import math
-from typing import List, Optional
+from typing import List
 from shapely.geometry import Polygon, box
 from shapely.ops import unary_union
 
@@ -179,7 +179,7 @@ class MissionOptimizer:
 
         return zone
 
-    def evaluate(self, portions: Optional[List[float]] = None) -> MissionResult:
+    def evaluate(self, portions: List[float]) -> MissionResult:
         """
         Evaluate mission performance for given field portions.
         Main pipeline: decomposition -> angle optimization -> path planning -> time calculation.
@@ -213,9 +213,11 @@ class MissionOptimizer:
             optimal_angle = find_optimal_angle(zone_polygon)
 
             angle_deg = math.degrees(optimal_angle)
-            path = generate_snake_simple(zone_polygon, angle_deg, drone.swath_width)
+            path = generate_snake_simple(zone_polygon, angle_deg, drone.swath_width,
+                                         start_position=drone.start_position)
 
-            num_turns = max(0, len(path) // 2 - 1)
+            real_points = [p for p in path if not math.isnan(p[0])]
+            num_turns = max(0, len(real_points) // 2 - 1)
 
             total_time = _compute_drone_time(drone, path, num_turns)
 

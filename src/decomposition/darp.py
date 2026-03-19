@@ -377,8 +377,6 @@ class DARP:
 
         return returnCrit
 
-
-    @njit(fastmath=True)
     def NormalizedEuclideanDistanceBinary(self, RobotR, BinaryMap):
         distRobot = cv2.distanceTransform(inverse_binary_map_as_uint8(BinaryMap), distanceType=2, maskSize=0, dstType=5)
         MaxV = float(np.max(distRobot))

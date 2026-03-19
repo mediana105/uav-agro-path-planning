@@ -23,8 +23,8 @@ class SimulatedAnnealingOptimizer:
     def optimize(self,
                  objective_function: Callable[[List[float]], float],
                  initial_portions: List[float],
-                 max_iterations: int = 1000) -> Dict[str, Any]:
-
+                 max_iterations: int = 1000,
+                 iteration_callback: Callable = None) -> Dict[str, Any]:
         current_portions = initial_portions.copy()
         current_value = objective_function(current_portions)
 
@@ -35,19 +35,26 @@ class SimulatedAnnealingOptimizer:
 
         iteration = 0
 
-
         while temperature > self.final_temp and iteration < max_iterations:
             neighbor_portions = self._generate_neighbor(current_portions)
             neighbor_value = objective_function(neighbor_portions)
             delta = neighbor_value - current_value
 
+            accepted = False
             if delta < 0 or (self.random.random() < math.exp(-delta / temperature)):
                 current_portions = neighbor_portions
                 current_value = neighbor_value
+                accepted = True
 
                 if current_value < best_value:
                     best_portions = current_portions.copy()
                     best_value = current_value
+
+            if iteration_callback is not None:
+                iteration_callback(
+                    iteration, current_portions, current_value,
+                    best_portions, best_value, temperature, accepted,
+                )
 
             temperature *= self.cooling_rate
             iteration += 1

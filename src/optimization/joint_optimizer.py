@@ -26,6 +26,7 @@ class JointOptimizer:
             step_size: float = 0.1,
             max_iterations: int = 1000,
             seed: Optional[int] = None,
+            iteration_callback: Optional[Any] = None,
     ) -> Dict[str, Any]:
         sa_optimizer = SimulatedAnnealingOptimizer(
             initial_temp=initial_temp,
@@ -38,7 +39,8 @@ class JointOptimizer:
         opt_result = sa_optimizer.optimize(
             objective_function=self.objective,
             initial_portions=initial_portions,
-            max_iterations=max_iterations
+            max_iterations=max_iterations,
+            iteration_callback=iteration_callback,
         )
 
         self._last_portions = opt_result['optimized_portions']
@@ -49,7 +51,6 @@ class JointOptimizer:
             'best_time': opt_result['best_value'],
             'iterations': opt_result['iterations'],
             'final_temperature': opt_result['final_temperature'],
-            'success': opt_result['success'],
             'final_mission_result': self._last_result
         }
 
