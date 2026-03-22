@@ -3,13 +3,14 @@ from typing import List, Tuple
 from shapely.geometry import Polygon
 
 from ..angle_finders.altitude_optimizer import find_optimal_angle
-from ..path_planning.boustrophedon import generate_snake_simple, path_length
+from ..path_planning.boustrophedon import generate_boustrophedon_coverage, path_length
 
 
 def build_zone_snake(
     zone_polygon: Polygon,
     swath_width: float,
     angle_rad: float = None,
+    start_position=None,
 ) -> Tuple[List[Tuple[float, float]], float, int]:
 
     if zone_polygon.is_empty:
@@ -19,7 +20,7 @@ def build_zone_snake(
         angle_rad = find_optimal_angle(zone_polygon)
 
     angle_deg = math.degrees(angle_rad)
-    path = generate_snake_simple(zone_polygon, angle_deg, swath_width)
+    path = generate_boustrophedon_coverage(zone_polygon, swath_width, angle_deg, start_position=start_position)
 
     num_turns = max(0, len(path) // 2 - 1) if len(path) >= 2 else 0
 

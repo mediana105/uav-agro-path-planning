@@ -59,3 +59,7 @@ class JointOptimizer:
 
     def get_last_mission_result(self) -> Optional[MissionResult]:
         return self._last_result
+
+    @property
+    def last_result(self):
+        return self._last_result

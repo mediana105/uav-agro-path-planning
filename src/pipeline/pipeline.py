@@ -1,27 +1,21 @@
 import math
 from typing import List
-from shapely.geometry import Polygon, box
+from shapely.geometry import Polygon, box, LineString
 from shapely.ops import unary_union
+
+
+def interior_polygon(interior) -> Polygon:
+    return Polygon(interior.coords)
 
 from src.angle_finders.altitude_optimizer import find_optimal_angle
 from src.decomposition.darp import DARP
 from src.decomposition.field_decomposition import FieldDecomposition
-from src.path_planning.boustrophedon import generate_snake_simple, path_length
+from src.path_planning.boustrophedon import path_length
+from src.optimization.zone_snake import build_zone_snake
 from src.pipeline import DroneConfig, MissionResult, ZoneResult
 
 
 def _compute_drone_time(drone: DroneConfig, path: list, num_turns: int) -> float:
-    """
-    Calculate total mission time for a single drone.
-
-    Args:
-        drone: Drone configuration with speed and turn_time parameters
-        path: List of waypoints for the drone to follow
-        num_turns: Number of turns in the path
-
-    Returns:
-        float: Total time in seconds (flight time + turn time)
-    """
     if len(path) < 2:
         return 0.0
 
@@ -33,18 +27,6 @@ def _compute_drone_time(drone: DroneConfig, path: list, num_turns: int) -> float
 
 
 def calculate_portions_by_productivity(drone_configs) -> List[float]:
-    """
-    Calculate field portions for each drone based on their productivity.
-    More productive drones get larger portions to balance overall mission time.
-
-    Productivity = swath_width * speed (area covered per unit time)
-
-    Args:
-        drone_configs: List of drone configurations with their parameters
-
-    Returns:
-        List[float]: Portions for each drone (sum = 1.0)
-    """
     productivity = []
     for drone in drone_configs:
         prod = drone.swath_width * drone.speed
@@ -59,10 +41,6 @@ def calculate_portions_by_productivity(drone_configs) -> List[float]:
 
 
 class MissionOptimizer:
-    """
-    Main class for optimizing agricultural drone mission planning.
-    Handles field decomposition, path planning, and joint optimization.
-    """
 
     def __init__(
             self,
@@ -70,14 +48,6 @@ class MissionOptimizer:
             drones: List[DroneConfig],
             cell_size: float = 1.0
     ):
-        """
-        Initialize mission optimizer with field and drone parameters.
-
-        Args:
-            field_polygon: Shapely polygon representing the field boundaries
-            drones: List of drone configurations with their parameters
-            cell_size: Grid cell size for field discretization (meters)
-        """
         self.field_polygon = field_polygon
         self.drones = drones
         self.num_drones = len(drones)
@@ -88,25 +58,12 @@ class MissionOptimizer:
         self.min_x, self.min_y, self.max_x, self.max_y = field_polygon.bounds
 
     def _prepare_grid(self):
-        """
-        Prepare grid representation of the field for DARP algorithm.
-        Discretizes the field polygon into a grid of cells.
-        """
         self.field_decomp = FieldDecomposition(self.cell_size)
         self.field_decomp.from_polygon(self.field_polygon)
         self.grid_rows = self.field_decomp.grid_rows
         self.grid_cols = self.field_decomp.grid_cols
 
     def _cords_to_index(self, x: float, y: float) -> int:
-        """
-        Convert continuous coordinates to grid cell index.
-
-        Args:
-            x, y: Continuous coordinates
-
-        Returns:
-            int: Grid cell index in row-major order
-        """
         col = int((x - self.min_x) / self.cell_size)
 
         row = int((y - self.min_y) / self.cell_size)
@@ -117,15 +74,6 @@ class MissionOptimizer:
         return row * self.grid_cols + col
 
     def _run_darp(self, portions: List[float]) -> DARP:
-        """
-        Run DARP (Divide Areas Algorithm for Robots) to decompose field.
-
-        Args:
-            portions: Target portion for each drone (sum should be 1.0)
-
-        Returns:
-            DARP: Executed DARP instance with assignment matrix
-        """
         if not hasattr(self, 'field_decomp'):
             self._prepare_grid()
 
@@ -142,23 +90,14 @@ class MissionOptimizer:
             given_initial_positions=grid_positions,
             given_portions=portions,
             obstacles_positions=obstacle_positions,
-            visualization=False
+            visualization=False,
+            MaxIter=1000,
         )
 
         darp.divideRegions()
         return darp
 
     def _extract_zone_polygon(self, assignment_matrix, drone_id: int) -> Polygon:
-        """
-        Extract polygon representing the zone assigned to a specific drone.
-
-        Args:
-            assignment_matrix: DARP assignment matrix (cell -> drone_id)
-            drone_id: ID of the drone to extract zone for
-
-        Returns:
-            Polygon: Shapely polygon representing the drone's zone
-        """
         cells = []
 
         for row in range(self.grid_rows):
@@ -174,22 +113,15 @@ class MissionOptimizer:
 
         zone = unary_union(cells)
 
-        if zone.geom_type == 'MultiPolygon':
-            zone = max(zone.geoms, key=lambda g: g.area)
+        for interior in self.field_polygon.interiors:
+            zone = zone.difference(interior_polygon(interior))
+
+        if zone.is_empty:
+            return Polygon()
 
         return zone
 
     def evaluate(self, portions: List[float]) -> MissionResult:
-        """
-        Evaluate mission performance for given field portions.
-        Main pipeline: decomposition -> angle optimization -> path planning -> time calculation.
-
-        Args:
-            portions: Field portions for each drone. If None, calculated automatically.
-
-        Returns:
-            MissionResult: Complete mission evaluation with time for each drone
-        """
         if portions is None:
             portions = calculate_portions_by_productivity(self.drones)
 
@@ -210,11 +142,23 @@ class MissionOptimizer:
                 ))
                 continue
 
-            optimal_angle = find_optimal_angle(zone_polygon)
+            if zone_polygon.geom_type == 'MultiPolygon':
+                sub_polygons = list(zone_polygon.geoms)
+            else:
+                sub_polygons = [zone_polygon]
 
-            angle_deg = math.degrees(optimal_angle)
-            path = generate_snake_simple(zone_polygon, angle_deg, drone.swath_width,
-                                         start_position=drone.start_position)
+            optimal_angle = find_optimal_angle(max(sub_polygons, key=lambda g: g.area))
+
+            path = []
+            current_start = drone.start_position
+            for sub_poly in sub_polygons:
+                sub_path, _, _ = build_zone_snake(sub_poly, drone.swath_width, start_position=current_start)
+                if not sub_path:
+                    continue
+                path.extend(sub_path[1:] if path else sub_path)
+                real_pts = [p for p in sub_path if not math.isnan(p[0])]
+                if real_pts:
+                    current_start = real_pts[-1]
 
             real_points = [p for p in path if not math.isnan(p[0])]
             num_turns = max(0, len(real_points) // 2 - 1)

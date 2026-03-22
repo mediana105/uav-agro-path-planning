@@ -168,7 +168,6 @@ class BoustrophedonCoverage:
             for interior in poly.interiors:
                 for x, _ in interior.coords:
                     xs.add(x)
-        set(sorted(xs))
         all_bounds = [p.bounds for p in polys]
         minx = min(b[0] for b in all_bounds)
         maxx = max(b[2] for b in all_bounds)
