@@ -22,11 +22,11 @@ def _pts_eq(a: Tuple[float, ...], b: Tuple[float, ...], eps: float = 1e-9) -> bo
 
 @dataclass
 class Cell:
-    idx: int # cell number
+    idx: int
     poly: ShapelyPolygon
-    x_min: float # horizontal borders
-    x_max: float # horizontal borders
-    neighbours: Set[int] = field(default_factory=set) # indexes of neighboring cells
+    x_min: float
+    x_max: float
+    neighbours: Set[int] = field(default_factory=set)
 
 
 @dataclass
@@ -54,7 +54,6 @@ def _traversal_order(cells: List[Cell], start_pt: Tuple[float, float]) -> List[i
     min_dist = math.inf
     pt = Point(start_pt)
 
-    # find start point
     for i, cell in enumerate(cells):
         if cell.poly.contains(pt):
             start_idx = i
@@ -83,26 +82,58 @@ def _traversal_order(cells: List[Cell], start_pt: Tuple[float, float]) -> List[i
     return order
 
 
-def _swath_x(swath: Swath) -> float:
-    return swath.segments[0][0][0]
+def _segment_inside_area(
+        p1: Tuple[float, float],
+        p2: Tuple[float, float],
+        area: ShapelyPolygon,
+) -> bool:
+    if _pts_eq(p1, p2):
+        return True
+    return area.buffer(1e-8).covers(LineString([p1, p2]))
 
 
 def _cover_swath_list(
         swaths: List[Swath],
         go_up: bool,
+        check_transitions: bool = False,
+        safe_area: Optional[ShapelyPolygon] = None,
 ) -> Tuple[List[Tuple[float, float]], bool]:
     path: List[Tuple[float, float]] = []
-    for swath in swaths:
+
+    for swath_idx, swath in enumerate(swaths):
         segments_sorted = sorted(swath.segments, key=lambda s: min(pt[1] for pt in s))
         if not go_up:
             segments_sorted = list(reversed(segments_sorted))
+
+        if swath_idx > 0 and path and not math.isnan(path[-1][0]):
+            first_point = segments_sorted[0][0] if go_up else segments_sorted[0][-1]
+            if not _pts_eq(path[-1], first_point, eps=1e-6):
+                if check_transitions and safe_area is not None:
+                    if not _segment_inside_area(path[-1], first_point, safe_area):
+                        path.append(_NAN)
+                    else:
+                        path.append(first_point)
+                else:
+                    path.append(first_point)
+
         for segment in segments_sorted:
             if not go_up:
                 segment = list(reversed(segment))
-            if path and not _pts_eq(path[-1], segment[0], eps=1e-6):
-                path.append(segment[0])
+            if (path
+                    and not math.isnan(path[-1][0])
+                    and not _pts_eq(path[-1], segment[0], eps=1e-6)):
+                if check_transitions and safe_area is not None:
+                    if not _segment_inside_area(path[-1], segment[0], safe_area):
+                        path.append(_NAN)
+                    else:
+                        path.append(segment[0])
+                else:
+                    path.append(segment[0])
+
             path.extend(segment)
+
         go_up = not go_up
+
     return path, go_up
 
 
@@ -110,7 +141,8 @@ def _simple_boustrophedon(
         poly: ShapelyPolygon,
         safe_area: ShapelyPolygon,
         swath: float,
-        start_pt: Tuple[float, float]
+        start_pt: Tuple[float, float],
+        check_transitions: bool = False,
 ) -> List[Tuple[float, float]]:
     minx, miny, maxx, maxy = poly.bounds
     width = maxx - minx
@@ -130,7 +162,6 @@ def _simple_boustrophedon(
             break
 
         line = LineString([(x, miny - 10), (x, maxy + 10)])
-
         intersection = line.intersection(safe_area)
 
         if intersection.is_empty:
@@ -160,11 +191,37 @@ def _simple_boustrophedon(
     first_y = sum(pt[1] for seg in first_swath.segments for pt in seg) / sum(len(seg) for seg in first_swath.segments)
     go_up = start_pt[1] <= first_y
 
-    path, go_up = _cover_swath_list(right_part, go_up)
+    path, go_up = _cover_swath_list(
+        right_part,
+        go_up,
+        check_transitions=check_transitions,
+        safe_area=safe_area if check_transitions else None
+    )
 
     if left_part:
-        path.append(_NAN)
-        left_path, _ = _cover_swath_list(left_part, go_up)
+        if path and not math.isnan(path[-1][0]):
+            first_left_swath = left_part[0]
+            segments_sorted = sorted(first_left_swath.segments, key=lambda s: min(pt[1] for pt in s))
+            if not go_up:
+                segments_sorted = list(reversed(segments_sorted))
+            first_left_point = segments_sorted[0][0] if go_up else segments_sorted[0][-1]
+
+            if check_transitions and safe_area is not None:
+                if not _segment_inside_area(path[-1], first_left_point, safe_area):
+                    path.append(_NAN)
+                else:
+                    path.append(first_left_point)
+            else:
+                path.append(first_left_point)
+        else:
+            path.append(_NAN)
+
+        left_path, _ = _cover_swath_list(
+            left_part,
+            go_up,
+            check_transitions=check_transitions,
+            safe_area=safe_area if check_transitions else None
+        )
         path.extend(left_path)
 
     return path
@@ -174,7 +231,8 @@ def _find_transition(
         cell_from: Cell,
         cell_to: Cell,
         point_from: Tuple[float, float],
-        point_to: Tuple[float, float]
+        point_to: Tuple[float, float],
+        safe_area: Optional[ShapelyPolygon] = None,
 ) -> List[Tuple[float, float]]:
     eps = 1e-6
 
@@ -187,20 +245,35 @@ def _find_transition(
     if shared_x is None:
         if _pts_eq(point_from, point_to, eps=1e-6):
             return []
-        return [point_to]
-
-    transition = []
-
-    if abs(point_from[0] - shared_x) < eps:
-        if not _pts_eq(point_from, (shared_x, point_to[1]), eps=1e-6):
-            transition.append((shared_x, point_to[1]))
+        raw = [point_to]
+    elif abs(point_from[0] - shared_x) < eps:
+        mid = (shared_x, point_to[1])
+        raw = [mid] if not _pts_eq(point_from, mid, eps=eps) else []
     else:
-        if not _pts_eq(point_from, (shared_x, point_from[1]), eps=1e-6):
-            transition.append((shared_x, point_from[1]))
-        if not _pts_eq((shared_x, point_from[1]), (shared_x, point_to[1]), eps=1e-6):
-            transition.append((shared_x, point_to[1]))
+        mid1 = (shared_x, point_from[1])
+        mid2 = (shared_x, point_to[1])
+        raw = []
+        if not _pts_eq(point_from, mid1, eps=eps):
+            raw.append(mid1)
+        if not _pts_eq(mid1, mid2, eps=eps):
+            raw.append(mid2)
 
-    return transition
+    if not raw or safe_area is None:
+        return raw
+
+    result: List[Tuple[float, float]] = []
+    prev = point_from
+    for pt in raw:
+        if not math.isnan(prev[0]) and not _segment_inside_area(prev, pt, safe_area):
+            result.append(_NAN)
+        result.append(pt)
+        prev = pt
+
+    return result
+
+
+def _last_real(path: List[Tuple[float, float]], fallback: Tuple[float, float]) -> Tuple[float, float]:
+    return next((p for p in reversed(path) if not math.isnan(p[0])), fallback)
 
 
 def _assemble_bcd_path(
@@ -208,6 +281,7 @@ def _assemble_bcd_path(
         order: List[int],
         swath: float,
         start_pt: Tuple[float, float],
+        safe_area: Optional[ShapelyPolygon] = None,
 ) -> List[Tuple[float, float]]:
     full_path = []
 
@@ -217,9 +291,15 @@ def _assemble_bcd_path(
         if idx == 0:
             entry_point = start_pt
         else:
-            entry_point = full_path[-1] if full_path else start_pt
+            entry_point = _last_real(full_path, start_pt)
 
-        cell_path = _simple_boustrophedon(cell.poly, cell.poly, swath, entry_point)
+        cell_path = _simple_boustrophedon(
+            cell.poly,
+            cell.poly,
+            swath,
+            entry_point,
+            check_transitions=False
+        )
 
         if not cell_path:
             continue
@@ -228,12 +308,14 @@ def _assemble_bcd_path(
             full_path = cell_path
         else:
             prev_cell = cells[order[idx - 1]]
-            transition = _find_transition(prev_cell, cell, full_path[-1], cell_path[0])
+            last = _last_real(full_path, start_pt)
+            transition = _find_transition(prev_cell, cell, last, cell_path[0], safe_area)
 
             if transition:
                 full_path.extend(transition)
 
-            if not _pts_eq(full_path[-1], cell_path[0], eps=1e-6):
+            tail = full_path[-1]
+            if not math.isnan(tail[0]) and not _pts_eq(tail, cell_path[0], eps=1e-6):
                 full_path.append(cell_path[0])
             full_path.extend(cell_path[1:])
 
@@ -342,10 +424,10 @@ class BoustrophedonCoverage:
 
         critical_x = set()
 
-        for pt in poly.exterior.coords:
+        for pt in safe_area.exterior.coords:
             critical_x.add(pt[0])
 
-        for interior in poly.interiors:
+        for interior in safe_area.interiors:
             for pt in interior.coords:
                 critical_x.add(pt[0])
 
@@ -465,8 +547,15 @@ class BoustrophedonCoverage:
             if cells:
                 _build_adjacency(cells)
                 order = _traversal_order(cells, start)
-                return _assemble_bcd_path(cells, order, swath, start)
-        return _simple_boustrophedon(poly, safe_poly, swath, start)
+                return _assemble_bcd_path(cells, order, swath, start, safe_poly)
+
+        return _simple_boustrophedon(
+            poly,
+            safe_poly,
+            swath,
+            start,
+            check_transitions=False
+        )
 
     def _rotate_back(self, path: List[Tuple[float, float]]) -> List[Tuple[float, float]]:
         if not path:
@@ -484,7 +573,6 @@ class BoustrophedonCoverage:
         return out
 
 
-
 def generate_boustrophedon_coverage(
         polygon: ShapelyPolygon,
         swath: float,
@@ -494,7 +582,6 @@ def generate_boustrophedon_coverage(
     if start_position is None:
         start_position = (polygon.centroid.x, polygon.centroid.y)
     return BoustrophedonCoverage(polygon, angle).generate_coverage_path(swath, start_position)
-
 
 
 def path_length(path: List[Tuple[float, float]]) -> float:
