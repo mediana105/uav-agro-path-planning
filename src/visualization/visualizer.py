@@ -8,7 +8,7 @@ from shapely.geometry import Polygon, Polygon as ShapelyPolygon
 
 from src.optimization.joint_optimizer import JointOptimizer
 from src.pipeline import DroneConfig, MissionResult
-from src.pipeline.pipeline import MissionOptimizer, calculate_portions_by_productivity
+from src.pipeline.pipeline import MissionOptimizer, calculate_portions_rth_aware
 
 _DRONE_COLORS = [
     "#2196F3",  # blue
@@ -47,6 +47,30 @@ def _draw_pass_arrows(ax: plt.Axes, path: list,
                                     mutation_scale=12), zorder=4)
 
 
+def _rth_legs(path: list, start_pos: tuple, eps: float = 1e-3):
+    legs = []
+    sx, sy = start_pos
+    n = len(path)
+    i = 0
+    while i < n - 3:
+        p0, p1, p2, p3 = path[i], path[i + 1], path[i + 2], path[i + 3]
+        if (math.isnan(p0[0])
+                and not math.isnan(p1[0])
+                and math.hypot(p1[0] - sx, p1[1] - sy) <= eps
+                and math.isnan(p2[0])
+                and not math.isnan(p3[0])):
+            depart = next(
+                (path[k] for k in range(i - 1, -1, -1) if not math.isnan(path[k][0])),
+                None,
+            )
+            if depart is not None:
+                legs.append((depart, p1, p3))
+            i += 3
+            continue
+        i += 1
+    return legs
+
+
 class MissionVisualizer:
     def __init__(self, field_polygon: Polygon, drones: List[DroneConfig], cell_size: float = 1.0) -> None:
         self.field_polygon = field_polygon
@@ -63,31 +87,70 @@ class MissionVisualizer:
         save_path: Optional[str] = None,
     ) -> plt.Figure:
         initial_portions, initial_result = self._run_initial()
-        sa_portions, sa_result, sa_meta = self._run_sa(initial_portions, sa_iterations, sa_seed)
+
         fig, (ax_init, ax_sa) = plt.subplots(1, 2, figsize=fig_size)
+        fig.suptitle("UAV Agricultural Mission Planning", fontsize=14, fontweight="bold")
+
         self.draw_panel(ax_init, initial_result, initial_portions,
                         title="Initial Decomposition\n(productivity‑based portions)")
+        plt.tight_layout()
+        plt.ion()
+        plt.show()
+        plt.pause(0.05)
+
+        joint = JointOptimizer(self._optimizer)
+        _best_seen = [float("inf")]
+
+        def _on_iter(iteration, cur_portions, cur_value,
+                     best_portions, best_value, temp, accepted):
+            if best_value < _best_seen[0]:
+                _best_seen[0] = best_value
+                result = joint.get_last_mission_result()
+                ax_sa.cla()
+                self.draw_panel(
+                    ax_sa, result, list(best_portions),
+                    title=(f"SA — iter {iteration + 1} / {sa_iterations}\n"
+                           f"t_best = {best_value:.1f} s   T = {temp:.2f}"),
+                )
+                fig.canvas.draw()
+                plt.pause(0.02)
+
+        meta = joint.optimize(
+            initial_portions=initial_portions,
+            max_iterations=sa_iterations,
+            seed=sa_seed,
+            iteration_callback=_on_iter,
+        )
+        sa_portions = meta["optimized_portions"]
+        sa_result = meta["final_mission_result"]
+        sa_meta = meta
+
+        plt.ioff()
+
+        # Draw final result
+        ax_sa.cla()
         self.draw_panel(ax_sa, sa_result, sa_portions,
                         title=f"SA‑Optimized Decomposition\n({sa_meta['iterations']} iterations)")
-        fig.suptitle("UAV Agricultural Mission Planning", fontsize=14, fontweight="bold")
         plt.tight_layout()
+
         if save_path:
             fig.savefig(save_path, dpi=150, bbox_inches="tight")
         if show:
             plt.show()
-        return fig
+        return fig, sa_result
 
     def _run_initial(self) -> Tuple[List[float], MissionResult]:
-        portions = calculate_portions_by_productivity(self.drones)
+        portions = calculate_portions_rth_aware(self.drones, self.field_polygon)
         result = self._optimizer.evaluate(portions)
         return portions, result
 
     def _run_sa(self, initial_portions: List[float], max_iterations: int,
-                seed: Optional[int]) -> Tuple[List[float], MissionResult, dict]:
+                seed: Optional[int], iteration_callback=None) -> Tuple[List[float], MissionResult, dict]:
         joint = JointOptimizer(self._optimizer)
         meta = joint.optimize(initial_portions=initial_portions,
                               max_iterations=max_iterations,
-                              seed=seed)
+                              seed=seed,
+                              iteration_callback=iteration_callback)
         return meta["optimized_portions"], meta["final_mission_result"], meta
 
     def draw_panel(self, ax: plt.Axes, result: MissionResult,
@@ -131,11 +194,24 @@ class MissionVisualizer:
                     ax.plot(first_real[0], first_real[1], "o", color=color,
                             markersize=5, markeredgecolor="white", markeredgewidth=0.6)
 
+                for depart, home, resume in _rth_legs(zone_result.path, drone.start_position):
+                    ax.plot([depart[0], home[0]], [depart[1], home[1]],
+                            "--", color=color, linewidth=1.4, alpha=0.55, zorder=3)
+                    ax.plot([home[0], resume[0]], [home[1], resume[1]],
+                            "--", color=color, linewidth=1.4, alpha=0.55, zorder=3)
+                    ax.plot(home[0], home[1], "D", color=color, markersize=8,
+                            markeredgecolor="black", markeredgewidth=0.7, zorder=7)
+
             sx, sy = drone.start_position
             ax.plot(sx, sy, "*", color=color, markersize=14,
                     markeredgecolor="black", markeredgewidth=0.5, zorder=5)
+            ax.plot(sx, sy, "o", color="none", markersize=22,
+                    markeredgecolor=color, markeredgewidth=2.0, zorder=4)
+            ax.text(sx, sy - 6, f"CS{drone.id}", ha="center", va="top",
+                    fontsize=7, color=color, fontweight="bold", zorder=6)
 
-            label = f"Drone {drone.id}  ({portions[i]:.1%})  t = {zone_result.total_time:.1f} s"
+            rth_label = f"  |  RTH: {zone_result.rth_count}x" if zone_result.rth_count else ""
+            label = f"Drone {drone.id}  ({portions[i]:.1%})  t = {zone_result.total_time:.1f} s{rth_label}"
             legend_handles.append(mpatches.Patch(color=color, label=label))
 
         ax.set_title(f"{title}\nMission time: {result.mission_time:.1f} s", fontsize=10)
@@ -183,28 +259,64 @@ class MissionVisualizer:
             ax.fill(hx, hy, color="white", zorder=4)
             ax.plot(hx, hy, "k--", linewidth=1.5, zorder=4)
 
+        for i, drone in enumerate(self.drones):
+            color = _DRONE_COLORS[i % len(_DRONE_COLORS)]
+            sx, sy = drone.start_position
+            ax.plot(sx, sy, "*", color=color, markersize=14,
+                    markeredgecolor="black", markeredgewidth=0.5, zorder=5)
+            ax.plot(sx, sy, "o", color="none", markersize=22,
+                    markeredgecolor=color, markeredgewidth=2.0, zorder=4)
+            ax.text(sx, sy - 6, f"CS{drone.id}", ha="center", va="top",
+                    fontsize=7, color=color, fontweight="bold", zorder=6)
+
         ax.set_aspect("equal", adjustable="box")
         ax.set_xlabel("X (m)")
         ax.set_ylabel("Y (m)")
         ax.set_title("UAV Flight Simulation")
         ax.grid(True, alpha=0.3)
 
+        _REFUEL_PAUSE = 5.0 / speed_factor
+
         drone_keyframes = []
         for idx, (zone_result, drone) in enumerate(zip(result.zones, self.drones)):
             speed = drone.speed * speed_factor
-            keyframes = [(0.0, *drone.start_position)]
+            # keyframe: (t, x, y, is_rth)
+            keyframes = [(0.0, *drone.start_position, False)]
             t = 0.0
             prev = drone.start_position
-            for pt in zone_result.path or []:
-                x, y = pt
+            sx, sy = drone.start_position
+            path_pts = zone_result.path or []
+            n_pts = len(path_pts)
+            pi = 0
+            while pi < n_pts:
+                x, y = path_pts[pi]
                 if math.isnan(x):
-                    t += drone.turn_time                     # пауза, спрей выключён
-                    keyframes.append((t, *prev))
-                    continue
-                dist = math.hypot(x - prev[0], y - prev[1])
-                t += dist / speed
-                keyframes.append((t, x, y))
-                prev = (x, y)
+                    if (pi + 3 < n_pts
+                            and not math.isnan(path_pts[pi + 1][0])
+                            and math.hypot(path_pts[pi + 1][0] - sx,
+                                           path_pts[pi + 1][1] - sy) < 1e-3
+                            and math.isnan(path_pts[pi + 2][0])
+                            and not math.isnan(path_pts[pi + 3][0])):
+                        hx, hy = path_pts[pi + 1]
+                        rx, ry = path_pts[pi + 3]
+                        t += math.hypot(hx - prev[0], hy - prev[1]) / speed
+                        keyframes.append((t, hx, hy, True))
+                        t += _REFUEL_PAUSE
+                        keyframes.append((t, hx, hy, True))
+                        t += math.hypot(rx - hx, ry - hy) / speed
+                        keyframes.append((t, rx, ry, False))
+                        prev = (rx, ry)
+                        pi += 4
+                        continue
+                    else:
+                        t += drone.turn_time
+                        keyframes.append((t, *prev, False))
+                else:
+                    dist = math.hypot(x - prev[0], y - prev[1])
+                    t += dist / speed
+                    keyframes.append((t, x, y, False))
+                    prev = (x, y)
+                pi += 1
             drone_keyframes.append(keyframes)
 
         total_time = max(kf[-1][0] if kf else 0.0 for kf in drone_keyframes)
@@ -231,21 +343,22 @@ class MissionVisualizer:
                             bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.7))
 
         def _pos_at(keyframes, t):
+            """Return (x, y, is_rth) interpolated at time t."""
             if not keyframes:
                 return None
             if t <= keyframes[0][0]:
-                return keyframes[0][1], keyframes[0][2]
+                return keyframes[0][1], keyframes[0][2], keyframes[0][3]
             if t >= keyframes[-1][0]:
-                return keyframes[-1][1], keyframes[-1][2]
+                return keyframes[-1][1], keyframes[-1][2], keyframes[-1][3]
             for j in range(len(keyframes) - 1):
-                t0, x0, y0 = keyframes[j]
-                t1, x1, y1 = keyframes[j + 1]
+                t0, x0, y0, rth0 = keyframes[j]
+                t1, x1, y1, rth1 = keyframes[j + 1]
                 if t0 <= t <= t1:
                     if math.isclose(t0, t1):
-                        return x1, y1
+                        return x1, y1, rth1
                     a = (t - t0) / (t1 - t0)
-                    return x0 + a * (x1 - x0), y0 + a * (y1 - y0)
-            return keyframes[-1][1], keyframes[-1][2]
+                    return x0 + a * (x1 - x0), y0 + a * (y1 - y0), rth0
+            return keyframes[-1][1], keyframes[-1][2], keyframes[-1][3]
 
         def update(frame):
             cur_t = frame / fps
@@ -256,10 +369,18 @@ class MissionVisualizer:
                 pos = _pos_at(kf, cur_t)
                 if pos is None:
                     continue
-                px, py = pos
+                px, py, is_rth = pos
                 marker.set_data([px], [py])
 
-                # если текущий кадр попал в паузу (координаты не меняются)
+                if is_rth:
+                    marker.set_marker("s")
+                    marker.set_markersize(10)
+                    marker.set_alpha(0.65)
+                else:
+                    marker.set_marker("^")
+                    marker.set_markersize(12)
+                    marker.set_alpha(1.0)
+
                 if trail_data[idx]["x"]:
                     lx, ly = trail_data[idx]["x"][-1], trail_data[idx]["y"][-1]
                     if math.hypot(px - lx, py - ly) < 1e-6:
@@ -274,7 +395,18 @@ class MissionVisualizer:
         anim = FuncAnimation(fig, update, frames=n_frames, interval=interval, blit=True)
 
         if save_path:
-            anim.save(save_path, fps=int(fps))
+            print(f"[video] Video {n_frames} cadrs → {save_path}")
+
+            def _progress(current_frame, total_frames):
+                if current_frame % max(1, total_frames // 20) == 0:
+                    pct = current_frame / total_frames * 100
+                    bar = "#" * int(pct // 5) + "." * (20 - int(pct // 5))
+                    print(f"\r[video] [{bar}] {pct:5.1f}%  ({current_frame}/{total_frames})",
+                          end="", flush=True)
+
+            anim.save(save_path, fps=int(fps), progress_callback=_progress)
+            print(f"\r[video] [####################] 100.0%  ({n_frames}/{n_frames})")
+            print(f"[video] done → {save_path}")
 
         plt.tight_layout()
         return anim

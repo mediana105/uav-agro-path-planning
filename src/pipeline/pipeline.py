@@ -10,7 +10,8 @@ def interior_polygon(interior) -> Polygon:
 from src.angle_finders.altitude_optimizer import find_optimal_angle
 from src.decomposition.darp import DARP
 from src.decomposition.field_decomposition import FieldDecomposition
-from src.path_planning.boustrophedon import path_length
+from src.path_planning.boustrophedon import path_length, apply_resource_limits
+from src.optimization.zone_snake import count_turns
 from src.optimization.zone_snake import build_zone_snake
 from src.pipeline import DroneConfig, MissionResult, ZoneResult
 
@@ -38,6 +39,41 @@ def calculate_portions_by_productivity(drone_configs) -> List[float]:
 
     portions = [p / total_productivity for p in productivity]
     return portions
+
+
+def calculate_portions_rth_aware(drone_configs, field_polygon: Polygon) -> List[float]:
+    centroid = field_polygon.centroid
+
+    effective_productivity = []
+    for drone in drone_configs:
+        sortie_by_substance = (
+            drone.tank_volume / drone.substance_rate
+            if drone.substance_rate > 0 and math.isfinite(drone.tank_volume)
+            else math.inf
+        )
+        sortie_by_time = (
+            drone.max_flight_time * drone.speed
+            if math.isfinite(drone.max_flight_time)
+            else math.inf
+        )
+        l_sortie = min(sortie_by_substance, sortie_by_time)
+
+        if math.isfinite(l_sortie) and l_sortie > 0:
+            d_home = math.hypot(
+                drone.start_position[0] - centroid.x,
+                drone.start_position[1] - centroid.y,
+            )
+            speed_eff = drone.speed * l_sortie / (l_sortie + 2.0 * d_home)
+        else:
+            speed_eff = drone.speed  # no resource limits — no correction needed
+
+        effective_productivity.append(drone.swath_width * speed_eff)
+
+    total = sum(effective_productivity)
+    if total == 0:
+        return [1.0 / len(drone_configs)] * len(drone_configs)
+
+    return [p / total for p in effective_productivity]
 
 
 class MissionOptimizer:
@@ -123,7 +159,7 @@ class MissionOptimizer:
 
     def evaluate(self, portions: List[float]) -> MissionResult:
         if portions is None:
-            portions = calculate_portions_by_productivity(self.drones)
+            portions = calculate_portions_rth_aware(self.drones, self.field_polygon)
 
         darp = self._run_darp(portions)
 
@@ -152,7 +188,7 @@ class MissionOptimizer:
             path = []
             current_start = drone.start_position
             for sub_poly in sub_polygons:
-                sub_path, _, _ = build_zone_snake(sub_poly, drone.swath_width, start_position=current_start)
+                sub_path, _, _ = build_zone_snake(sub_poly, drone.swath_width, angle_rad=optimal_angle, start_position=current_start)
                 if not sub_path:
                     continue
                 path.extend(sub_path[1:] if path else sub_path)
@@ -160,8 +196,17 @@ class MissionOptimizer:
                 if real_pts:
                     current_start = real_pts[-1]
 
-            real_points = [p for p in path if not math.isnan(p[0])]
-            num_turns = max(0, len(real_points) // 2 - 1)
+            path, rth_count = apply_resource_limits(
+                path,
+                start_position=drone.start_position,
+                speed=drone.speed,
+                substance_rate=drone.substance_rate,
+                tank_volume=drone.tank_volume,
+                max_flight_time=drone.max_flight_time,
+                turn_time=drone.turn_time,
+            )
+
+            num_turns = count_turns(path)
 
             total_time = _compute_drone_time(drone, path, num_turns)
 
@@ -170,7 +215,8 @@ class MissionOptimizer:
                 zone_polygon=zone_polygon,
                 optimal_angle=optimal_angle,
                 path=path,
-                total_time=total_time
+                total_time=total_time,
+                rth_count=rth_count,
             ))
 
         return MissionResult(zones=zone_results)

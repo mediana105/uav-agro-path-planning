@@ -15,6 +15,7 @@ class ZoneResult:
     optimal_angle: float
     path: List[Tuple[float, float]]
     total_time: float
+    rth_count: int = 0  # number of refuel/recharge stops
 
 
 @dataclass

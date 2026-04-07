@@ -22,7 +22,7 @@ def build_zone_snake(
     angle_deg = math.degrees(angle_rad)
     path = generate_boustrophedon_coverage(zone_polygon, swath_width, angle_deg, start_position=start_position)
 
-    num_turns = max(0, len(path) // 2 - 1) if len(path) >= 2 else 0
+    num_turns = count_turns(path)
 
     return path, angle_rad, num_turns
 
