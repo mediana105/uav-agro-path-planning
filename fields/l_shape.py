@@ -1,4 +1,5 @@
 from shapely.geometry import Polygon
+
 from src.pipeline import DroneConfig
 
 # Г-образное поле (~1.7 га) с прудом внутри

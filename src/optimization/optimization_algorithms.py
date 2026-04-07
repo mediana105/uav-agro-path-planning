@@ -1,7 +1,9 @@
 import math
 import random
+from collections.abc import Callable
+from typing import Any
+
 import numpy as np
-from typing import List, Callable, Dict, Any
 
 
 class SimulatedAnnealingOptimizer:
@@ -21,10 +23,10 @@ class SimulatedAnnealingOptimizer:
         np.random.seed(random_seed)
 
     def optimize(self,
-                 objective_function: Callable[[List[float]], float],
-                 initial_portions: List[float],
+                 objective_function: Callable[[list[float]], float],
+                 initial_portions: list[float],
                  max_iterations: int = 1000,
-                 iteration_callback: Callable = None) -> Dict[str, Any]:
+                 iteration_callback: Callable = None) -> dict[str, Any]:
         current_portions = initial_portions.copy()
         current_value = objective_function(current_portions)
 
@@ -66,7 +68,7 @@ class SimulatedAnnealingOptimizer:
             'final_temperature': temperature
         }
 
-    def _generate_neighbor(self, portions: List[float]) -> List[float]:
+    def _generate_neighbor(self, portions: list[float]) -> list[float]:
         neighbor = np.array(portions, dtype=float)
         n = len(neighbor)
 

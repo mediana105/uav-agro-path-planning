@@ -1,17 +1,17 @@
-from typing import List, Optional, Dict, Any
+from typing import Any
 
-from .optimization_algorithms import SimulatedAnnealingOptimizer
 from ..pipeline.mission_result import MissionResult
+from .optimization_algorithms import SimulatedAnnealingOptimizer
 
 
 class JointOptimizer:
     def __init__(self, mission_optimizer):
         self.mission_optimizer = mission_optimizer
         self.n_drones = mission_optimizer.num_drones
-        self._last_result: Optional[MissionResult] = None
-        self._last_portions: Optional[List[float]] = None
+        self._last_result: MissionResult | None = None
+        self._last_portions: list[float] | None = None
 
-    def objective(self, portions: List[float]) -> float:
+    def objective(self, portions: list[float]) -> float:
         result = self.mission_optimizer.evaluate(portions)
         self._last_result = result
         self._last_portions = portions
@@ -19,15 +19,15 @@ class JointOptimizer:
 
     def optimize(
             self,
-            initial_portions: List[float] = None,
+            initial_portions: list[float] = None,
             initial_temp: float = 1000.0,
             final_temp: float = 1e-10,
             cooling_rate: float = 0.95,
             step_size: float = 0.1,
             max_iterations: int = 1000,
-            seed: Optional[int] = None,
-            iteration_callback: Optional[Any] = None,
-    ) -> Dict[str, Any]:
+            seed: int | None = None,
+            iteration_callback: Any | None = None,
+    ) -> dict[str, Any]:
         sa_optimizer = SimulatedAnnealingOptimizer(
             initial_temp=initial_temp,
             final_temp=final_temp,
@@ -54,10 +54,10 @@ class JointOptimizer:
             'final_mission_result': self._last_result
         }
 
-    def get_last_portions(self) -> Optional[List[float]]:
+    def get_last_portions(self) -> list[float] | None:
         return self._last_portions
 
-    def get_last_mission_result(self) -> Optional[MissionResult]:
+    def get_last_mission_result(self) -> MissionResult | None:
         return self._last_result
 
     @property

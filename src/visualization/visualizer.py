@@ -1,10 +1,12 @@
 import math
-from typing import List, Optional, Tuple
+from typing import Any
 
 import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
-from shapely.geometry import Polygon, Polygon as ShapelyPolygon
+from matplotlib.figure import Figure
+from shapely.geometry import Polygon
+from shapely.geometry import Polygon as ShapelyPolygon
 
 from src.optimization.joint_optimizer import JointOptimizer
 from src.pipeline import DroneConfig, MissionResult
@@ -43,8 +45,8 @@ def _draw_pass_arrows(ax: plt.Axes, path: list,
         dx = (x2 - x1) / length * eps
         dy = (y2 - y1) / length * eps
         ax.annotate("", xy=(mx + dx, my + dy), xytext=(mx - dx, my - dy),
-                    arrowprops=dict(arrowstyle="-|>", color=color, lw=1.2,
-                                    mutation_scale=12), zorder=4)
+                    arrowprops={"arrowstyle": "-|>", "color": color, "lw": 1.2,
+                                    "mutation_scale": 12}, zorder=4)
 
 
 def _rth_legs(path: list, start_pos: tuple, eps: float = 1e-3):
@@ -72,7 +74,7 @@ def _rth_legs(path: list, start_pos: tuple, eps: float = 1e-3):
 
 
 class MissionVisualizer:
-    def __init__(self, field_polygon: Polygon, drones: List[DroneConfig], cell_size: float = 1.0) -> None:
+    def __init__(self, field_polygon: Polygon, drones: list[DroneConfig], cell_size: float = 1.0) -> None:
         self.field_polygon = field_polygon
         self.drones = drones
         self.cell_size = cell_size
@@ -81,11 +83,11 @@ class MissionVisualizer:
     def visualize(
         self,
         sa_iterations: int = 100,
-        sa_seed: Optional[int] = 42,
-        fig_size: Tuple[int, int] = (16, 8),
+        sa_seed: int | None = 42,
+        fig_size: tuple[int, int] = (16, 8),
         show: bool = True,
-        save_path: Optional[str] = None,
-    ) -> plt.Figure:
+        save_path: str | None = None,
+    ) -> tuple[Figure, Any]:
         initial_portions, initial_result = self._run_initial()
 
         fig, (ax_init, ax_sa) = plt.subplots(1, 2, figsize=fig_size)
@@ -139,13 +141,13 @@ class MissionVisualizer:
             plt.show()
         return fig, sa_result
 
-    def _run_initial(self) -> Tuple[List[float], MissionResult]:
+    def _run_initial(self) -> tuple[list[float], MissionResult]:
         portions = calculate_portions_rth_aware(self.drones, self.field_polygon)
         result = self._optimizer.evaluate(portions)
         return portions, result
 
-    def _run_sa(self, initial_portions: List[float], max_iterations: int,
-                seed: Optional[int], iteration_callback=None) -> Tuple[List[float], MissionResult, dict]:
+    def _run_sa(self, initial_portions: list[float], max_iterations: int,
+                seed: int | None, iteration_callback=None) -> tuple[list[float], MissionResult, dict]:
         joint = JointOptimizer(self._optimizer)
         meta = joint.optimize(initial_portions=initial_portions,
                               max_iterations=max_iterations,
@@ -154,7 +156,7 @@ class MissionVisualizer:
         return meta["optimized_portions"], meta["final_mission_result"], meta
 
     def draw_panel(self, ax: plt.Axes, result: MissionResult,
-                   portions: List[float], title: str) -> None:
+                   portions: list[float], title: str) -> None:
         fx, fy = self.field_polygon.exterior.xy
         ax.fill(fx, fy, alpha=0.06, color="gray")
         ax.plot(fx, fy, "k-", linewidth=2)
@@ -223,8 +225,8 @@ class MissionVisualizer:
 
     def simulate(self, result: MissionResult, interval: int = 50,
                  speed_factor: float = 1.0,
-                 fig_size: Tuple[int, int] = (12, 8),
-                 save_path: Optional[str] = None) -> FuncAnimation:
+                 fig_size: tuple[int, int] = (12, 8),
+                 save_path: str | None = None) -> FuncAnimation:
         fig, ax = plt.subplots(figsize=fig_size)
         fx, fy = self.field_polygon.exterior.xy
         ax.fill(fx, fy, alpha=0.06, color="gray")
@@ -278,7 +280,7 @@ class MissionVisualizer:
         _REFUEL_PAUSE = 5.0 / speed_factor
 
         drone_keyframes = []
-        for idx, (zone_result, drone) in enumerate(zip(result.zones, self.drones)):
+        for _idx, (zone_result, drone) in enumerate(zip(result.zones, self.drones, strict=False)):
             speed = drone.speed * speed_factor
             # keyframe: (t, x, y, is_rth)
             keyframes = [(0.0, *drone.start_position, False)]
@@ -340,7 +342,7 @@ class MissionVisualizer:
         ax.legend(handles=legend_handles, loc="upper right", fontsize=9)
         time_text = ax.text(0.02, 0.97, "t = 0.0 s", transform=ax.transAxes,
                             fontsize=11, verticalalignment="top",
-                            bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.7))
+                            bbox={"boxstyle": "round,pad=0.3", "facecolor": "white", "alpha": 0.7})
 
         def _pos_at(keyframes, t):
             """Return (x, y, is_rth) interpolated at time t."""
@@ -363,9 +365,10 @@ class MissionVisualizer:
         def update(frame):
             cur_t = frame / fps
             time_text.set_text(f"t = {cur_t:.1f} s")
-            for idx, (marker, trail, kf) in enumerate(zip(drone_markers,
+            for idx, (marker, trail, kf) in enumerate(zip(drone_markers,  # noqa: B007
                                                           drone_trails,
-                                                          drone_keyframes)):
+                                                          drone_keyframes,
+                                                          strict=False)):
                 pos = _pos_at(kf, cur_t)
                 if pos is None:
                     continue

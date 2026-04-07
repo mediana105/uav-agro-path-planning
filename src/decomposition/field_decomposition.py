@@ -1,6 +1,7 @@
-import numpy as np
-from shapely import Polygon, Point
 import math
+
+import numpy as np
+from shapely import Point, Polygon
 
 
 class FieldDecomposition:

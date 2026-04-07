@@ -1,6 +1,7 @@
 import os
 import random
 import sys
+
 import cv2
 import numpy as np
 from numba import njit
@@ -148,7 +149,7 @@ class DARP:
         if notEqualPortions:
             portions = given_portions
         else:
-            for drone in range(len(initial_positions)):
+            for _drone in range(len(initial_positions)):
                 portions.append(1 / len(initial_positions))
 
         if len(initial_positions) != len(portions):
@@ -172,7 +173,7 @@ class DARP:
         GridEnv = np.full(shape=(self.rows, self.cols), fill_value=-1)  # create non obstacle map with value -1
 
         # obstacle tiles value is -2
-        for idx, obstacle_pos in enumerate(self.obstacles_positions):
+        for _idx, obstacle_pos in enumerate(self.obstacles_positions):
             GridEnv[obstacle_pos[0], obstacle_pos[1]] = -2
 
         connectivity = np.zeros((self.rows, self.cols))
@@ -317,7 +318,6 @@ class DARP:
 
     def construct_Assignment_Matrix(self):
         Notiles = self.rows * self.cols
-        fair_division = 1 / self.droneNo
         effectiveSize = Notiles - self.droneNo - len(self.obstacles_positions)
         termThr = 0
 

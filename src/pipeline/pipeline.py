@@ -1,19 +1,18 @@
 import math
-from typing import List
-from shapely.geometry import Polygon, box, LineString
+
+from shapely.geometry import Polygon, box
 from shapely.ops import unary_union
-
-
-def interior_polygon(interior) -> Polygon:
-    return Polygon(interior.coords)
 
 from src.angle_finders.altitude_optimizer import find_optimal_angle
 from src.decomposition.darp import DARP
 from src.decomposition.field_decomposition import FieldDecomposition
-from src.path_planning.boustrophedon import path_length, apply_resource_limits
-from src.optimization.zone_snake import count_turns
-from src.optimization.zone_snake import build_zone_snake
+from src.optimization.zone_snake import build_zone_snake, count_turns
+from src.path_planning.boustrophedon import apply_resource_limits, path_length
 from src.pipeline import DroneConfig, MissionResult, ZoneResult
+
+
+def interior_polygon(interior) -> Polygon:
+    return Polygon(interior.coords)
 
 
 def _compute_drone_time(drone: DroneConfig, path: list, num_turns: int) -> float:
@@ -27,7 +26,7 @@ def _compute_drone_time(drone: DroneConfig, path: list, num_turns: int) -> float
     return flight_time + turn_time
 
 
-def calculate_portions_by_productivity(drone_configs) -> List[float]:
+def calculate_portions_by_productivity(drone_configs) -> list[float]:
     productivity = []
     for drone in drone_configs:
         prod = drone.swath_width * drone.speed
@@ -41,7 +40,7 @@ def calculate_portions_by_productivity(drone_configs) -> List[float]:
     return portions
 
 
-def calculate_portions_rth_aware(drone_configs, field_polygon: Polygon) -> List[float]:
+def calculate_portions_rth_aware(drone_configs, field_polygon: Polygon) -> list[float]:
     centroid = field_polygon.centroid
 
     effective_productivity = []
@@ -81,7 +80,7 @@ class MissionOptimizer:
     def __init__(
             self,
             field_polygon: Polygon,
-            drones: List[DroneConfig],
+            drones: list[DroneConfig],
             cell_size: float = 1.0
     ):
         self.field_polygon = field_polygon
@@ -109,7 +108,7 @@ class MissionOptimizer:
 
         return row * self.grid_cols + col
 
-    def _run_darp(self, portions: List[float]) -> DARP:
+    def _run_darp(self, portions: list[float]) -> DARP:
         if not hasattr(self, 'field_decomp'):
             self._prepare_grid()
 
@@ -157,7 +156,7 @@ class MissionOptimizer:
 
         return zone
 
-    def evaluate(self, portions: List[float]) -> MissionResult:
+    def evaluate(self, portions: list[float]) -> MissionResult:
         if portions is None:
             portions = calculate_portions_rth_aware(self.drones, self.field_polygon)
 

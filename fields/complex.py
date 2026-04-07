@@ -1,4 +1,5 @@
 from shapely.geometry import Polygon
+
 from src.pipeline import DroneConfig
 
 # Неправильная вогнутая форма (трапеция с выемкой сверху) + два препятствия

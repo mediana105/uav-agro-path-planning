@@ -1,22 +1,24 @@
 import math
 from dataclasses import dataclass, field
-from typing import List, Tuple, Optional, Set, Union, cast
+from typing import cast
 
 from shapely.affinity import rotate
 from shapely.geometry import (
     LineString,
     MultiLineString,
-    Point,
-    Polygon as ShapelyPolygon,
     MultiPolygon,
+    Point,
     box,
+)
+from shapely.geometry import (
+    Polygon as ShapelyPolygon,
 )
 from shapely.ops import unary_union
 
 _NAN = (float("nan"), float("nan"))
 
 
-def _pts_eq(a: Tuple[float, ...], b: Tuple[float, ...], eps: float = 1e-9) -> bool:
+def _pts_eq(a: tuple[float, ...], b: tuple[float, ...], eps: float = 1e-9) -> bool:
     return math.hypot(a[0] - b[0], a[1] - b[1]) < eps
 
 
@@ -26,15 +28,15 @@ class Cell:
     poly: ShapelyPolygon
     x_min: float
     x_max: float
-    neighbours: Set[int] = field(default_factory=set)
+    neighbours: set[int] = field(default_factory=set)
 
 
 @dataclass
 class Swath:
-    segments: List[List[Tuple[float, float]]]
+    segments: list[list[tuple[float, float]]]
 
 
-def _build_adjacency(cells: List[Cell], eps: float = 1e-6) -> None:
+def _build_adjacency(cells: list[Cell], eps: float = 1e-6) -> None:
     n = len(cells)
     for i in range(n):
         for j in range(i + 1, n):
@@ -46,7 +48,7 @@ def _build_adjacency(cells: List[Cell], eps: float = 1e-6) -> None:
                 cells[j].neighbours.add(i)
 
 
-def _traversal_order(cells: List[Cell], start_pt: Tuple[float, float]) -> List[int]:
+def _traversal_order(cells: list[Cell], start_pt: tuple[float, float]) -> list[int]:
     if not cells:
         return []
 
@@ -63,8 +65,8 @@ def _traversal_order(cells: List[Cell], start_pt: Tuple[float, float]) -> List[i
             min_dist = d
             start_idx = i
 
-    visited: Set[int] = set()
-    order: List[int] = []
+    visited: set[int] = set()
+    order: list[int] = []
 
     def dfs(u: int):
         visited.add(u)
@@ -83,8 +85,8 @@ def _traversal_order(cells: List[Cell], start_pt: Tuple[float, float]) -> List[i
 
 
 def _segment_inside_area(
-        p1: Tuple[float, float],
-        p2: Tuple[float, float],
+        p1: tuple[float, float],
+        p2: tuple[float, float],
         area: ShapelyPolygon,
 ) -> bool:
     if _pts_eq(p1, p2):
@@ -93,12 +95,12 @@ def _segment_inside_area(
 
 
 def _cover_swath_list(
-        swaths: List[Swath],
+        swaths: list[Swath],
         go_up: bool,
         check_transitions: bool = False,
-        safe_area: Optional[ShapelyPolygon] = None,
-) -> Tuple[List[Tuple[float, float]], bool]:
-    path: List[Tuple[float, float]] = []
+        safe_area: ShapelyPolygon | None = None,
+) -> tuple[list[tuple[float, float]], bool]:
+    path: list[tuple[float, float]] = []
 
     for swath_idx, swath in enumerate(swaths):
         segments_sorted = sorted(swath.segments, key=lambda s: min(pt[1] for pt in s))
@@ -141,9 +143,9 @@ def _simple_boustrophedon(
         poly: ShapelyPolygon,
         safe_area: ShapelyPolygon,
         swath: float,
-        start_pt: Tuple[float, float],
+        start_pt: tuple[float, float],
         check_transitions: bool = False,
-) -> List[Tuple[float, float]]:
+) -> list[tuple[float, float]]:
     minx, miny, maxx, maxy = poly.bounds
     width = maxx - minx
 
@@ -152,7 +154,7 @@ def _simple_boustrophedon(
 
     n_swaths = max(1, int(math.ceil(width / swath)))
 
-    swaths_by_x: List[Swath] = []
+    swaths_by_x: list[Swath] = []
     start_idx = 0
     min_dist = float("inf")
 
@@ -230,10 +232,10 @@ def _simple_boustrophedon(
 def _find_transition(
         cell_from: Cell,
         cell_to: Cell,
-        point_from: Tuple[float, float],
-        point_to: Tuple[float, float],
-        safe_area: Optional[ShapelyPolygon] = None,
-) -> List[Tuple[float, float]]:
+        point_from: tuple[float, float],
+        point_to: tuple[float, float],
+        safe_area: ShapelyPolygon | None = None,
+) -> list[tuple[float, float]]:
     eps = 1e-6
 
     shared_x = None
@@ -261,7 +263,7 @@ def _find_transition(
     if not raw or safe_area is None:
         return raw
 
-    result: List[Tuple[float, float]] = []
+    result: list[tuple[float, float]] = []
     prev = point_from
     for pt in raw:
         if not math.isnan(prev[0]) and not _segment_inside_area(prev, pt, safe_area):
@@ -272,17 +274,17 @@ def _find_transition(
     return result
 
 
-def _last_real(path: List[Tuple[float, float]], fallback: Tuple[float, float]) -> Tuple[float, float]:
+def _last_real(path: list[tuple[float, float]], fallback: tuple[float, float]) -> tuple[float, float]:
     return next((p for p in reversed(path) if not math.isnan(p[0])), fallback)
 
 
 def _assemble_bcd_path(
-        cells: List[Cell],
-        order: List[int],
+        cells: list[Cell],
+        order: list[int],
         swath: float,
-        start_pt: Tuple[float, float],
-        safe_area: Optional[ShapelyPolygon] = None,
-) -> List[Tuple[float, float]]:
+        start_pt: tuple[float, float],
+        safe_area: ShapelyPolygon | None = None,
+) -> list[tuple[float, float]]:
     full_path = []
 
     for idx, cid in enumerate(order):
@@ -323,9 +325,9 @@ def _assemble_bcd_path(
 
 
 def _connect_sub_paths(
-        sub_paths: List[List[Tuple[float, float]]],
-        start: Tuple[float, float]
-) -> List[Tuple[float, float]]:
+        sub_paths: list[list[tuple[float, float]]],
+        start: tuple[float, float]
+) -> list[tuple[float, float]]:
     if not sub_paths:
         return []
 
@@ -373,8 +375,8 @@ class BoustrophedonCoverage:
         self.poly = rotate(poly, -angle, origin="centroid")
 
     def generate_coverage_path(
-            self, swath: float, start: Tuple[float, float]
-    ) -> List[Tuple[float, float]]:
+            self, swath: float, start: tuple[float, float]
+    ) -> list[tuple[float, float]]:
         if self.poly.is_empty:
             return []
 
@@ -392,7 +394,7 @@ class BoustrophedonCoverage:
         raw_path = self._generate_for_safe_poly(self.poly, safe_area, swath, start_pt)
         return self._rotate_back(raw_path)
 
-    def _make_safe_area(self, swath: float) -> Union[ShapelyPolygon, MultiPolygon]:
+    def _make_safe_area(self, swath: float) -> ShapelyPolygon | MultiPolygon:
         outer = self.poly.buffer(-swath / 2)
 
         if outer.is_empty:
@@ -419,7 +421,7 @@ class BoustrophedonCoverage:
             self,
             poly: ShapelyPolygon,
             safe_area: ShapelyPolygon,
-    ) -> List[Cell]:
+    ) -> list[Cell]:
         minx, miny, maxx, maxy = poly.bounds
 
         critical_x = set()
@@ -436,12 +438,12 @@ class BoustrophedonCoverage:
 
         critical_x = sorted(critical_x)
 
-        cells: List[Cell] = []
+        cells: list[Cell] = []
         cell_id = 0
 
-        prev_x: Optional[float] = None
-        prev_intervals: List[Tuple[float, float]] = []
-        current_cells: List[Optional[ShapelyPolygon]] = []
+        prev_x: float | None = None
+        prev_intervals: list[tuple[float, float]] = []
+        current_cells: list[ShapelyPolygon | None] = []
 
         for x in critical_x:
             line = LineString([(x, miny - 10), (x, maxy + 10)])
@@ -497,7 +499,7 @@ class BoustrophedonCoverage:
         return cells
 
     @staticmethod
-    def _extract_y_intervals(geom) -> List[Tuple[float, float]]:
+    def _extract_y_intervals(geom) -> list[tuple[float, float]]:
         intervals = []
         if geom.is_empty:
             return intervals
@@ -517,8 +519,8 @@ class BoustrophedonCoverage:
             self,
             mp: MultiPolygon,
             swath: float,
-            start: Tuple[float, float]
-    ) -> List[Tuple[float, float]]:
+            start: tuple[float, float]
+    ) -> list[tuple[float, float]]:
         s_rot = rotate(Point(start), -self.angle, origin=self.original.centroid)
         cur = (s_rot.x, s_rot.y)
 
@@ -538,8 +540,8 @@ class BoustrophedonCoverage:
             poly: ShapelyPolygon,
             safe_poly: ShapelyPolygon,
             swath: float,
-            start: Tuple[float, float]
-    ) -> List[Tuple[float, float]]:
+            start: tuple[float, float]
+    ) -> list[tuple[float, float]]:
         has_holes = len(list(safe_poly.interiors)) > 0
 
         if has_holes:
@@ -557,7 +559,7 @@ class BoustrophedonCoverage:
             check_transitions=False
         )
 
-    def _rotate_back(self, path: List[Tuple[float, float]]) -> List[Tuple[float, float]]:
+    def _rotate_back(self, path: list[tuple[float, float]]) -> list[tuple[float, float]]:
         if not path:
             return path
         cen = self.original.centroid
@@ -577,14 +579,14 @@ def generate_boustrophedon_coverage(
         polygon: ShapelyPolygon,
         swath: float,
         angle: float = 0.0,
-        start_position: Optional[Tuple[float, float]] = None,
-) -> List[Tuple[float, float]]:
+        start_position: tuple[float, float] | None = None,
+) -> list[tuple[float, float]]:
     if start_position is None:
         start_position = (polygon.centroid.x, polygon.centroid.y)
     return BoustrophedonCoverage(polygon, angle).generate_coverage_path(swath, start_position)
 
 
-def path_length(path: List[Tuple[float, float]]) -> float:
+def path_length(path: list[tuple[float, float]]) -> float:
     total = 0.0
     for i in range(len(path) - 1):
         x1, y1 = path[i]
@@ -596,14 +598,14 @@ def path_length(path: List[Tuple[float, float]]) -> float:
 
 
 def _split_at_turns(
-        path: List[Tuple[float, float]],
+        path: list[tuple[float, float]],
         angle_threshold: float = math.pi / 4,
-) -> List[List[Tuple[float, float]]]:
+) -> list[list[tuple[float, float]]]:
     if not path:
         return []
 
-    segments: List[List[Tuple[float, float]]] = []
-    current: List[Tuple[float, float]] = []
+    segments: list[list[tuple[float, float]]] = []
+    current: list[tuple[float, float]] = []
 
     for i, pt in enumerate(path):
         if math.isnan(pt[0]):
@@ -618,7 +620,7 @@ def _split_at_turns(
         if len(current) < 2:
             continue
 
-        next_real: Optional[Tuple[float, float]] = None
+        next_real: tuple[float, float] | None = None
         for j in range(i + 1, len(path)):
             if not math.isnan(path[j][0]):
                 next_real = path[j]
@@ -647,14 +649,14 @@ def _split_at_turns(
 
 
 def apply_resource_limits(
-        path: List[Tuple[float, float]],
-        start_position: Tuple[float, float],
+        path: list[tuple[float, float]],
+        start_position: tuple[float, float],
         speed: float,
         substance_rate: float = 0.0,
         tank_volume: float = float("inf"),
         max_flight_time: float = float("inf"),
         turn_time: float = 1.0,
-) -> Tuple[List[Tuple[float, float]], int]:
+) -> tuple[list[tuple[float, float]], int]:
     no_substance = substance_rate <= 0 or not math.isfinite(tank_volume)
     no_time = not math.isfinite(max_flight_time)
 
@@ -663,11 +665,11 @@ def apply_resource_limits(
 
     segments = _split_at_turns(path)
 
-    result: List[Tuple[float, float]] = []
+    result: list[tuple[float, float]] = []
     substance_used = 0.0
     flight_time_used = 0.0
     rth_count = 0
-    current_pos: Tuple[float, float] = start_position
+    current_pos: tuple[float, float] = start_position
     after_rth = True
 
     for seg in segments:

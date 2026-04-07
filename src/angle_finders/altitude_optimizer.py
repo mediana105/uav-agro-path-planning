@@ -1,6 +1,7 @@
-from shapely.geometry import Polygon
-from shapely.affinity import rotate
 import math
+
+from shapely.affinity import rotate
+from shapely.geometry import Polygon
 
 
 def get_general_altitude(p: Polygon, theta: float) -> float:

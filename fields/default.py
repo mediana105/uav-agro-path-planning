@@ -1,4 +1,5 @@
 from shapely.geometry import Polygon
+
 from src.pipeline import DroneConfig
 
 FIELD = Polygon([

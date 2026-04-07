@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import List, Tuple
+
 from shapely.geometry import Polygon
 
 
@@ -13,7 +13,7 @@ class ZoneResult:
     drone_id: int
     zone_polygon: Polygon
     optimal_angle: float
-    path: List[Tuple[float, float]]
+    path: list[tuple[float, float]]
     total_time: float
     rth_count: int = 0  # number of refuel/recharge stops
 
@@ -25,7 +25,7 @@ class MissionResult:
 
     Aggregates individual zone results and provides overall mission metrics.
     """
-    zones: List[ZoneResult]
+    zones: list[ZoneResult]
 
     @property
     def mission_time(self) -> float:

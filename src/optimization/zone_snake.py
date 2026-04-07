@@ -1,5 +1,5 @@
 import math
-from typing import List, Tuple
+
 from shapely.geometry import Polygon
 
 from ..angle_finders.altitude_optimizer import find_optimal_angle
@@ -11,7 +11,7 @@ def build_zone_snake(
     swath_width: float,
     angle_rad: float = None,
     start_position=None,
-) -> Tuple[List[Tuple[float, float]], float, int]:
+) -> tuple[list[tuple[float, float]], float, int]:
 
     if zone_polygon.is_empty:
         return [], 0.0, 0
@@ -27,7 +27,7 @@ def build_zone_snake(
     return path, angle_rad, num_turns
 
 
-def zone_path_length(path: List[Tuple[float, float]]) -> float:
+def zone_path_length(path: list[tuple[float, float]]) -> float:
     return path_length(path)
 
 

@@ -16,6 +16,7 @@ import importlib
 from pathlib import Path
 
 import matplotlib
+
 matplotlib.use("MacOSX")
 import matplotlib.pyplot as plt
 
