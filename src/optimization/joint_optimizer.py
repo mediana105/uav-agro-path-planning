@@ -1,7 +1,7 @@
 from typing import Any
 
 from ..pipeline.mission_result import MissionResult
-from .optimization_algorithms import SimulatedAnnealingOptimizer
+from .optimization_algorithms import SimulatedAnnealingOptimizer, TabuSearchOptimizer
 
 
 class JointOptimizer:
@@ -20,23 +20,40 @@ class JointOptimizer:
     def optimize(
             self,
             initial_portions: list[float] = None,
+            algorithm: str = "sa",
+            # SA parameters
             initial_temp: float = 1000.0,
             final_temp: float = 1e-10,
             cooling_rate: float = 0.95,
             step_size: float = 0.1,
+            # Tabu Search parameters
+            tabu_tenure: int = 15,
+            num_neighbors: int = 5,
+            tabu_step_size: float = 0.05,
+            tabu_epsilon: float = 1e-3,
+            # Common
             max_iterations: int = 1000,
             seed: int | None = None,
             iteration_callback: Any | None = None,
     ) -> dict[str, Any]:
-        sa_optimizer = SimulatedAnnealingOptimizer(
-            initial_temp=initial_temp,
-            final_temp=final_temp,
-            cooling_rate=cooling_rate,
-            step_size=step_size,
-            random_seed=seed
-        )
+        if algorithm == "tabu":
+            optimizer = TabuSearchOptimizer(
+                tabu_tenure=tabu_tenure,
+                num_neighbors=num_neighbors,
+                step_size=tabu_step_size,
+                tabu_epsilon=tabu_epsilon,
+                random_seed=seed if seed is not None else 1,
+            )
+        else:
+            optimizer = SimulatedAnnealingOptimizer(
+                initial_temp=initial_temp,
+                final_temp=final_temp,
+                cooling_rate=cooling_rate,
+                step_size=step_size,
+                random_seed=seed,
+            )
 
-        opt_result = sa_optimizer.optimize(
+        opt_result = optimizer.optimize(
             objective_function=self.objective,
             initial_portions=initial_portions,
             max_iterations=max_iterations,

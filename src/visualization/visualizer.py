@@ -84,13 +84,16 @@ class MissionVisualizer:
         self,
         sa_iterations: int = 100,
         sa_seed: int | None = 42,
+        algorithm: str = "sa",
         fig_size: tuple[int, int] = (16, 8),
         show: bool = True,
         save_path: str | None = None,
     ) -> tuple[Figure, Any]:
         initial_portions, initial_result = self._run_initial()
 
-        fig, (ax_init, ax_sa) = plt.subplots(1, 2, figsize=fig_size)
+        algo_label = "Tabu Search" if algorithm == "tabu" else "SA"
+
+        fig, (ax_init, ax_opt) = plt.subplots(1, 2, figsize=fig_size)
         fig.suptitle("UAV Agricultural Mission Planning", fontsize=14, fontweight="bold")
 
         self.draw_panel(ax_init, initial_result, initial_portions,
@@ -108,48 +111,51 @@ class MissionVisualizer:
             if best_value < _best_seen[0]:
                 _best_seen[0] = best_value
                 result = joint.get_last_mission_result()
-                ax_sa.cla()
-                self.draw_panel(
-                    ax_sa, result, list(best_portions),
-                    title=(f"SA — iter {iteration + 1} / {sa_iterations}\n"
-                           f"t_best = {best_value:.1f} s   T = {temp:.2f}"),
-                )
+                ax_opt.cla()
+                if algorithm == "tabu":
+                    iter_title = (f"Tabu Search — iter {iteration + 1} / {sa_iterations}\n"
+                                  f"t_best = {best_value:.1f} s")
+                else:
+                    iter_title = (f"SA — iter {iteration + 1} / {sa_iterations}\n"
+                                  f"t_best = {best_value:.1f} s   T = {temp:.2f}")
+                self.draw_panel(ax_opt, result, list(best_portions), title=iter_title)
                 fig.canvas.draw()
                 plt.pause(0.02)
 
         meta = joint.optimize(
             initial_portions=initial_portions,
+            algorithm=algorithm,
             max_iterations=sa_iterations,
             seed=sa_seed,
             iteration_callback=_on_iter,
         )
-        sa_portions = meta["optimized_portions"]
-        sa_result = meta["final_mission_result"]
-        sa_meta = meta
+        opt_portions = meta["optimized_portions"]
+        opt_result = meta["final_mission_result"]
 
         plt.ioff()
 
-        # Draw final result
-        ax_sa.cla()
-        self.draw_panel(ax_sa, sa_result, sa_portions,
-                        title=f"SA‑Optimized Decomposition\n({sa_meta['iterations']} iterations)")
+        ax_opt.cla()
+        self.draw_panel(ax_opt, opt_result, opt_portions,
+                        title=f"{algo_label}‑Optimized Decomposition\n({meta['iterations']} iterations)")
         plt.tight_layout()
 
         if save_path:
             fig.savefig(save_path, dpi=150, bbox_inches="tight")
         if show:
             plt.show()
-        return fig, sa_result
+        return fig, opt_result
 
     def _run_initial(self) -> tuple[list[float], MissionResult]:
         portions = calculate_portions_rth_aware(self.drones, self.field_polygon)
         result = self._optimizer.evaluate(portions)
         return portions, result
 
-    def _run_sa(self, initial_portions: list[float], max_iterations: int,
-                seed: int | None, iteration_callback=None) -> tuple[list[float], MissionResult, dict]:
+    def _run_optimizer(self, initial_portions: list[float], max_iterations: int,
+                       seed: int | None, algorithm: str = "sa",
+                       iteration_callback=None) -> tuple[list[float], MissionResult, dict]:
         joint = JointOptimizer(self._optimizer)
         meta = joint.optimize(initial_portions=initial_portions,
+                              algorithm=algorithm,
                               max_iterations=max_iterations,
                               seed=seed,
                               iteration_callback=iteration_callback)

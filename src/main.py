@@ -2,12 +2,12 @@
 UAV Agricultural Path Planning — entry point.
 
 Usage:
-    python -m src.main # default field (fields/default.py)
-    python -m src.main l_shape # fields/l_shape.py
-    python -m src.main complex # fields/complex.py
+    python -m src.main                          # default field, SA
+    python -m src.main l_shape                  # fields/l_shape.py, SA
+    python -m src.main complex --algorithm tabu # fields/complex.py, Tabu Search
 
 Results are saved in the out/<field_name>/ folder:
-    plan.png — static plan (initial partitioning + SA-optimization)
+    plan.png  — static plan (initial partitioning + optimized decomposition)
     flight.mp4 — flight animation
 """
 
@@ -38,6 +38,8 @@ def _parse_args():
                    help="Path to save plan figure (default: out/<field>/plan.png)")
     p.add_argument("--video", type=str, default=None,
                    help="Path to save flight video (default: out/<field>/flight.mp4)")
+    p.add_argument("--algorithm", choices=["sa", "tabu"], default="sa",
+                   help="Optimization algorithm: sa (Simulated Annealing) or tabu (Tabu Search)")
     p.add_argument("--no-video", action="store_true",
                    help="Skip video generation")
     p.add_argument("--speed", type=float, default=10.0,
@@ -75,10 +77,12 @@ def main():
 
     vis = MissionVisualizer(field, drones, cell_size=cell_size)
 
-    print(f"[main] Building the plan ({sa_iter} iteration SA)...")
+    algo_label = "Tabu Search" if args.algorithm == "tabu" else "SA"
+    print(f"[main] Building the plan ({sa_iter} iterations, {algo_label})...")
     _, sa_result = vis.visualize(
         sa_iterations=sa_iter,
         sa_seed=sa_seed,
+        algorithm=args.algorithm,
         show=args.show,
         save_path=plan_path,
     )
