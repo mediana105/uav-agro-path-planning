@@ -3,7 +3,7 @@ import math
 from shapely.geometry import Polygon
 
 from ..angle_finders.altitude_optimizer import find_optimal_angle
-from ..path_planning.boustrophedon import generate_boustrophedon_coverage, path_length
+from ..path_planning.boustrophedon import generate_boustrophedon_coverage
 
 
 def build_zone_snake(
@@ -25,10 +25,6 @@ def build_zone_snake(
     num_turns = count_turns(path)
 
     return path, angle_rad, num_turns
-
-
-def zone_path_length(path: list[tuple[float, float]]) -> float:
-    return path_length(path)
 
 
 def count_turns(path: list, angle_threshold_deg: float = 10.0) -> int:

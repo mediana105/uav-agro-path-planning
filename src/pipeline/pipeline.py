@@ -26,20 +26,6 @@ def _compute_drone_time(drone: DroneConfig, path: list, num_turns: int) -> float
     return flight_time + turn_time
 
 
-def calculate_portions_by_productivity(drone_configs) -> list[float]:
-    productivity = []
-    for drone in drone_configs:
-        prod = drone.swath_width * drone.speed
-        productivity.append(prod)
-
-    total_productivity = sum(productivity)
-    if total_productivity == 0:
-        return [1.0 / len(drone_configs)] * len(drone_configs)
-
-    portions = [p / total_productivity for p in productivity]
-    return portions
-
-
 def calculate_portions_rth_aware(drone_configs, field_polygon: Polygon) -> list[float]:
     centroid = field_polygon.centroid
 

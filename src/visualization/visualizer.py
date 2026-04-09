@@ -150,17 +150,6 @@ class MissionVisualizer:
         result = self._optimizer.evaluate(portions)
         return portions, result
 
-    def _run_optimizer(self, initial_portions: list[float], max_iterations: int,
-                       seed: int | None, algorithm: str = "sa",
-                       iteration_callback=None) -> tuple[list[float], MissionResult, dict]:
-        joint = JointOptimizer(self._optimizer)
-        meta = joint.optimize(initial_portions=initial_portions,
-                              algorithm=algorithm,
-                              max_iterations=max_iterations,
-                              seed=seed,
-                              iteration_callback=iteration_callback)
-        return meta["optimized_portions"], meta["final_mission_result"], meta
-
     def draw_panel(self, ax: plt.Axes, result: MissionResult,
                    portions: list[float], title: str) -> None:
         fx, fy = self.field_polygon.exterior.xy
