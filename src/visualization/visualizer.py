@@ -8,9 +8,9 @@ from matplotlib.figure import Figure
 from shapely.geometry import Polygon
 from shapely.geometry import Polygon as ShapelyPolygon
 
-from src.optimization.joint_optimizer import JointOptimizer
-from src.pipeline import DroneConfig, MissionResult
-from src.pipeline.pipeline import MissionOptimizer, calculate_portions_rth_aware
+from ..optimization.joint_optimizer import JointOptimizer
+from ..pipeline import DroneConfig, MissionResult
+from ..pipeline.pipeline import MissionOptimizer, calculate_portions_rth_aware
 
 _DRONE_COLORS = [
     "#2196F3",  # blue

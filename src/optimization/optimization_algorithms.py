@@ -7,6 +7,30 @@ from typing import Any
 import numpy as np
 
 
+def _generate_neighbor(portions: list[float], step_size: float, rng: random.Random) -> list[float]:
+    neighbor = np.array(portions, dtype=float)
+    n = len(neighbor)
+
+    i = rng.randint(0, n - 1)
+    j = rng.randint(0, n - 1)
+    while i == j:
+        j = rng.randint(0, n - 1)
+
+    delta = rng.uniform(0, step_size) * min(neighbor[i], neighbor[j])
+
+    if rng.random() < 0.5:
+        neighbor[i] -= delta
+        neighbor[j] += delta
+    else:
+        neighbor[i] += delta
+        neighbor[j] -= delta
+
+    neighbor = np.maximum(neighbor, 0.01)
+    neighbor = neighbor / np.sum(neighbor)
+
+    return neighbor.tolist()
+
+
 class SimulatedAnnealingOptimizer:
 
     def __init__(self,
@@ -70,31 +94,7 @@ class SimulatedAnnealingOptimizer:
         }
 
     def _generate_neighbor(self, portions: list[float]) -> list[float]:
-        neighbor = np.array(portions, dtype=float)
-        n = len(neighbor)
-
-        # Select two different drones
-        i = self.random.randint(0, n - 1)
-        j = self.random.randint(0, n - 1)
-        while i == j:
-            j = self.random.randint(0, n - 1)
-
-        delta = self.random.uniform(0, self.step_size) * min(neighbor[i], neighbor[j])
-
-        if self.random.random() < 0.5:
-            neighbor[i] -= delta
-            neighbor[j] += delta
-        else:
-            neighbor[i] += delta
-            neighbor[j] -= delta
-
-        neighbor = np.maximum(neighbor, 0.01)
-
-        # Normalize
-        total = np.sum(neighbor)
-        neighbor = neighbor / total
-
-        return neighbor.tolist()
+        return _generate_neighbor(portions, self.step_size, self.random)
 
 
 class TabuSearchOptimizer:
@@ -178,27 +178,7 @@ class TabuSearchOptimizer:
         }
 
     def _generate_neighbor(self, portions: list[float]) -> list[float]:
-        neighbor = np.array(portions, dtype=float)
-        n = len(neighbor)
-
-        i = self.random.randint(0, n - 1)
-        j = self.random.randint(0, n - 1)
-        while i == j:
-            j = self.random.randint(0, n - 1)
-
-        delta = self.random.uniform(0, self.step_size) * min(neighbor[i], neighbor[j])
-
-        if self.random.random() < 0.5:
-            neighbor[i] -= delta
-            neighbor[j] += delta
-        else:
-            neighbor[i] += delta
-            neighbor[j] -= delta
-
-        neighbor = np.maximum(neighbor, 0.01)
-        neighbor = neighbor / np.sum(neighbor)
-
-        return neighbor.tolist()
+        return _generate_neighbor(portions, self.step_size, self.random)
 
     def _is_tabu(self, candidate: list[float], tabu_list: deque) -> bool:
         c = np.array(candidate)

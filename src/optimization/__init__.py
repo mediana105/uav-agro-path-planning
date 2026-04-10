@@ -1,7 +1,8 @@
 from .joint_optimizer import JointOptimizer
-from .zone_snake import build_zone_snake
+from .optimization_algorithms import SimulatedAnnealingOptimizer, TabuSearchOptimizer
 
 __all__ = [
-    "build_zone_snake",
     "JointOptimizer",
+    "SimulatedAnnealingOptimizer",
+    "TabuSearchOptimizer",
 ]

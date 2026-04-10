@@ -3,12 +3,12 @@ import math
 from shapely.geometry import Polygon, box
 from shapely.ops import unary_union
 
-from src.angle_finders.altitude_optimizer import find_optimal_angle
-from src.decomposition.darp import DARP
-from src.decomposition.field_decomposition import FieldDecomposition
-from src.optimization.zone_snake import build_zone_snake, count_turns
-from src.path_planning.boustrophedon import apply_resource_limits, path_length
-from src.pipeline import DroneConfig, MissionResult, ZoneResult
+from ..angle_finders.altitude_optimizer import find_optimal_angle
+from ..decomposition.darp import DARP
+from ..decomposition.field_decomposition import FieldDecomposition
+from ..optimization.zone_snake import build_zone_snake, count_turns
+from ..path_planning.boustrophedon import apply_resource_limits, path_length
+from . import DroneConfig, MissionResult, ZoneResult
 
 
 def interior_polygon(interior) -> Polygon:
