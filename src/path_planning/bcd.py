@@ -86,35 +86,53 @@ def _match_intervals(
     Returns list of (prev_idx, curr_idx) pairs if topology unchanged,
     None if split/merge occurred (different count, no overlap, or order violation).
     """
-    if not prev_intervals or not curr_intervals:
-        return [] if len(prev_intervals) == len(curr_intervals) == 0 else None
 
+    if not prev_intervals and not curr_intervals:
+        return []
     if len(prev_intervals) != len(curr_intervals):
         return None
 
-    matches: list[tuple[int, int]] = []
-    used_curr = set()
-
-    for i, (py0, py1) in enumerate(prev_intervals):
-        best_match = None
-        best_overlap = -math.inf
-
-        for j, (cy0, cy1) in enumerate(curr_intervals):
-            if j in used_curr:
+    def normalize(intervals):
+        norm = []
+        for y0, y1 in intervals:
+            if y1 - y0 < eps:
                 continue
-            overlap = min(py1, cy1) - max(py0, cy0)
-            if overlap > best_overlap:
-                best_overlap = overlap
-                best_match = j
+            norm.append((y0, y1))
+        return norm
 
-        if best_match is None or best_overlap < -eps:
+    prev = normalize(prev_intervals)
+    curr = normalize(curr_intervals)
+
+    if len(prev) != len(curr):
+        return None
+
+    matches = []
+    j = 0
+
+    for i, (py0, py1) in enumerate(prev):
+        best_j = None
+
+        while j < len(curr):
+            cy0, cy1 = curr[j]
+            overlap = min(py1, cy1) - max(py0, cy0)
+
+            if overlap >= -eps:
+                best_j = j
+                break
+
+            if cy1 < py0:
+                j += 1
+            else:
+                break
+
+        if best_j is None:
             return None
 
-        matches.append((i, best_match))
-        used_curr.add(best_match)
+        matches.append((i, best_j))
+        j = best_j + 1
 
-    for i in range(len(matches) - 1):
-        if matches[i][1] >= matches[i + 1][1]:
+    for k in range(len(matches) - 1):
+        if matches[k][1] >= matches[k + 1][1]:
             return None
 
     return matches
