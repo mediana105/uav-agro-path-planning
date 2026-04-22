@@ -24,13 +24,21 @@ _DRONE_COLORS = [
 ]
 
 
+def _is_nan_point(pt) -> bool:
+    if not isinstance(pt, (tuple, list)):
+        return False
+    if len(pt) >= 2 and math.isnan(pt[0]):
+        return True
+    return False
+
+
 def _draw_pass_arrows(ax: plt.Axes, path: list,
                       optimal_angle: float, color: str) -> None:
     pass_dir = math.pi / 2 + optimal_angle
     for i in range(len(path) - 1):
         x1, y1 = path[i]
         x2, y2 = path[i + 1]
-        if math.isnan(x1) or math.isnan(x2):
+        if _is_nan_point((x1, y1)) or _is_nan_point((x2, y2)):
             continue
         seg_angle = math.atan2(y2 - y1, x2 - x1)
         diff = abs((seg_angle - pass_dir) % math.pi)
@@ -46,7 +54,7 @@ def _draw_pass_arrows(ax: plt.Axes, path: list,
         dy = (y2 - y1) / length * eps
         ax.annotate("", xy=(mx + dx, my + dy), xytext=(mx - dx, my - dy),
                     arrowprops={"arrowstyle": "-|>", "color": color, "lw": 1.2,
-                                    "mutation_scale": 12}, zorder=4)
+                                "mutation_scale": 12}, zorder=4)
 
 
 def _rth_legs(path: list, start_pos: tuple, eps: float = 1e-3):
@@ -56,13 +64,16 @@ def _rth_legs(path: list, start_pos: tuple, eps: float = 1e-3):
     i = 0
     while i < n - 3:
         p0, p1, p2, p3 = path[i], path[i + 1], path[i + 2], path[i + 3]
-        if (math.isnan(p0[0])
-                and not math.isnan(p1[0])
+        if any(isinstance(p, tuple) and len(p) == 3 for p in (p0, p1, p2, p3)):
+            i += 1
+            continue
+        if (_is_nan_point(p0)
+                and not _is_nan_point(p1)
                 and math.hypot(p1[0] - sx, p1[1] - sy) <= eps
-                and math.isnan(p2[0])
-                and not math.isnan(p3[0])):
+                and _is_nan_point(p2)
+                and not _is_nan_point(p3)):
             depart = next(
-                (path[k] for k in range(i - 1, -1, -1) if not math.isnan(path[k][0])),
+                (path[k] for k in range(i - 1, -1, -1) if not _is_nan_point(path[k])),
                 None,
             )
             if depart is not None:
@@ -81,24 +92,26 @@ class MissionVisualizer:
         self._optimizer = MissionOptimizer(field_polygon, drones, cell_size)
 
     def visualize(
-        self,
-        sa_iterations: int = 100,
-        sa_seed: int | None = 42,
-        algorithm: str = "sa",
-        fig_size: tuple[int, int] = (16, 8),
-        show: bool = True,
-        save_path: str | None = None,
+            self,
+            sa_iterations: int = 100,
+            sa_seed: int | None = 42,
+            algorithm: str = "sa",
+            fig_size: tuple[int, int] = (16, 8),
+            show: bool = True,
+            save_path: str | None = None,
     ) -> tuple[Figure, Any]:
         initial_portions, initial_result = self._run_initial()
-
         algo_label = "Tabu Search" if algorithm == "tabu" else "SA"
 
         fig, (ax_init, ax_opt) = plt.subplots(1, 2, figsize=fig_size)
         fig.suptitle("UAV Agricultural Mission Planning", fontsize=14, fontweight="bold")
 
+        # Увеличенный нижний отступ, чтобы легенда не перекрывала подписи осей
+        plt.subplots_adjust(bottom=0.35)
+
         self.draw_panel(ax_init, initial_result, initial_portions,
                         title="Initial Decomposition\n(productivity‑based portions)")
-        plt.tight_layout()
+        # Не используем tight_layout, чтобы сохранить ручные отступы
         plt.ion()
         plt.show()
         plt.pause(0.05)
@@ -133,11 +146,9 @@ class MissionVisualizer:
         opt_result = meta["final_mission_result"]
 
         plt.ioff()
-
         ax_opt.cla()
         self.draw_panel(ax_opt, opt_result, opt_portions,
                         title=f"{algo_label}‑Optimized Decomposition\n({meta['iterations']} iterations)")
-        plt.tight_layout()
 
         if save_path:
             fig.savefig(save_path, dpi=150, bbox_inches="tight")
@@ -183,10 +194,19 @@ class MissionVisualizer:
                     ax.plot(ix, iy, "-", color=color, linewidth=1.0)
 
             if zone_result.path:
-                px = [p[0] for p in zone_result.path]
-                py = [p[1] for p in zone_result.path]
-                ax.plot(px, py, "-", color=color, linewidth=0.9, alpha=0.80)
-                first_real = next((p for p in zone_result.path if not math.isnan(p[0])), None)
+                seg_x, seg_y = [], []
+                for pt in zone_result.path:
+                    if _is_nan_point(pt):
+                        if seg_x:
+                            ax.plot(seg_x, seg_y, "-", color=color, linewidth=0.9, alpha=0.80)
+                            seg_x, seg_y = [], []
+                    else:
+                        seg_x.append(pt[0])
+                        seg_y.append(pt[1])
+                if seg_x:
+                    ax.plot(seg_x, seg_y, "-", color=color, linewidth=0.9, alpha=0.80)
+
+                first_real = next((p for p in zone_result.path if not _is_nan_point(p)), None)
                 if first_real:
                     ax.plot(first_real[0], first_real[1], "o", color=color,
                             markersize=5, markeredgecolor="white", markeredgewidth=0.6)
@@ -215,7 +235,11 @@ class MissionVisualizer:
         ax.set_xlabel("X (m)")
         ax.set_ylabel("Y (m)")
         ax.set_aspect("equal", adjustable="box")
-        ax.legend(handles=legend_handles, loc="upper right", fontsize=8)
+
+        # Легенда снизу, ещё ниже, чтобы не перекрывать подписи осей и сетку
+        ax.legend(handles=legend_handles, loc='upper center', bbox_to_anchor=(0.5, -0.3),
+                  fontsize=8, ncol=2, frameon=True, fancybox=True, shadow=True)
+
         ax.grid(True, alpha=0.3)
 
     def simulate(self, result: MissionResult, interval: int = 50,
@@ -240,16 +264,15 @@ class MissionVisualizer:
             if zone_result.path:
                 seg_x, seg_y = [], []
                 for pt in zone_result.path:
-                    if math.isnan(pt[0]):
-                        ax.plot(seg_x, seg_y, "-", color=color,
-                                linewidth=0.7, alpha=0.3)
-                        seg_x, seg_y = [], []
+                    if _is_nan_point(pt):
+                        if seg_x:
+                            ax.plot(seg_x, seg_y, "-", color=color, linewidth=0.7, alpha=0.3)
+                            seg_x, seg_y = [], []
                     else:
                         seg_x.append(pt[0])
                         seg_y.append(pt[1])
                 if seg_x:
-                    ax.plot(seg_x, seg_y, "-", color=color,
-                            linewidth=0.7, alpha=0.3)
+                    ax.plot(seg_x, seg_y, "-", color=color, linewidth=0.7, alpha=0.3)
 
         for interior in self.field_polygon.interiors:
             hx, hy = interior.xy
@@ -275,9 +298,8 @@ class MissionVisualizer:
         _REFUEL_PAUSE = 5.0 / speed_factor
 
         drone_keyframes = []
-        for _idx, (zone_result, drone) in enumerate(zip(result.zones, self.drones, strict=False)):
+        for zone_result, drone in zip(result.zones, self.drones, strict=False):
             speed = drone.speed * speed_factor
-            # keyframe: (t, x, y, is_rth)
             keyframes = [(0.0, *drone.start_position, False)]
             t = 0.0
             prev = drone.start_position
@@ -286,14 +308,19 @@ class MissionVisualizer:
             n_pts = len(path_pts)
             pi = 0
             while pi < n_pts:
-                x, y = path_pts[pi]
+                pt = path_pts[pi]
+                # пропускаем трёхэлементные маркеры
+                if isinstance(pt, tuple) and len(pt) == 3:
+                    pi += 1
+                    continue
+                x, y = pt
                 if math.isnan(x):
                     if (pi + 3 < n_pts
-                            and not math.isnan(path_pts[pi + 1][0])
+                            and not _is_nan_point(path_pts[pi + 1])
                             and math.hypot(path_pts[pi + 1][0] - sx,
                                            path_pts[pi + 1][1] - sy) < 1e-3
-                            and math.isnan(path_pts[pi + 2][0])
-                            and not math.isnan(path_pts[pi + 3][0])):
+                            and _is_nan_point(path_pts[pi + 2])
+                            and not _is_nan_point(path_pts[pi + 3])):
                         hx, hy = path_pts[pi + 1]
                         rx, ry = path_pts[pi + 3]
                         t += math.hypot(hx - prev[0], hy - prev[1]) / speed
@@ -340,7 +367,6 @@ class MissionVisualizer:
                             bbox={"boxstyle": "round,pad=0.3", "facecolor": "white", "alpha": 0.7})
 
         def _pos_at(keyframes, t):
-            """Return (x, y, is_rth) interpolated at time t."""
             if not keyframes:
                 return None
             if t <= keyframes[0][0]:
@@ -360,16 +386,12 @@ class MissionVisualizer:
         def update(frame):
             cur_t = frame / fps
             time_text.set_text(f"t = {cur_t:.1f} s")
-            for idx, (marker, trail, kf) in enumerate(zip(drone_markers,  # noqa: B007
-                                                          drone_trails,
-                                                          drone_keyframes,
-                                                          strict=False)):
+            for idx, (marker, trail, kf) in enumerate(zip(drone_markers, drone_trails, drone_keyframes, strict=False)):
                 pos = _pos_at(kf, cur_t)
                 if pos is None:
                     continue
                 px, py, is_rth = pos
                 marker.set_data([px], [py])
-
                 if is_rth:
                     marker.set_marker("s")
                     marker.set_markersize(10)
@@ -393,7 +415,7 @@ class MissionVisualizer:
         anim = FuncAnimation(fig, update, frames=n_frames, interval=interval, blit=True)
 
         if save_path:
-            print(f"[video] Video {n_frames} cadrs → {save_path}")
+            print(f"[video] Video {n_frames} frames → {save_path}")
 
             def _progress(current_frame, total_frames):
                 if current_frame % max(1, total_frames // 20) == 0:
