@@ -21,6 +21,8 @@ matplotlib.use("MacOSX")
 import matplotlib.pyplot as plt
 
 from src.visualization.visualizer import MissionVisualizer
+import logging
+logging.getLogger('src.path_planning.boustrophedon').setLevel(logging.WARNING)
 
 
 def _parse_args():
