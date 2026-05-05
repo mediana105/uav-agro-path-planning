@@ -5,7 +5,9 @@ from typing import List, Optional, Tuple
 
 from shapely.affinity import rotate
 from shapely.geometry import (
-    LineString, Point, Polygon as ShapelyPolygon,
+    LineString,
+    Point,
+    Polygon as ShapelyPolygon,
 )
 
 
@@ -13,9 +15,9 @@ def _extract_linestring(geom) -> List[LineString]:
     if geom is None or geom.is_empty:
         return []
     gtype = geom.geom_type
-    if gtype == 'LineString':
+    if gtype == "LineString":
         return [geom]
-    if gtype in ('MultiLineString', 'GeometryCollection'):
+    if gtype in ("MultiLineString", "GeometryCollection"):
         result: List[LineString] = []
         for part in geom.geoms:
             result.extend(_extract_linestring(part))
@@ -24,19 +26,22 @@ def _extract_linestring(geom) -> List[LineString]:
 
 
 def _rotate_point_back(
-        px: float, py: float,
-        cx: float, cy: float,
-        cos_a: float, sin_a: float,
+    px: float,
+    py: float,
+    cx: float,
+    cy: float,
+    cos_a: float,
+    sin_a: float,
 ) -> Tuple[float, float]:
     dx, dy = px - cx, py - cy
     return cx + cos_a * dx - sin_a * dy, cy + sin_a * dx + cos_a * dy
 
 
 def generate_boustrophedon_coverage(
-        polygon: ShapelyPolygon,
-        swath: float,
-        angle: float = 0.0,  # radians
-        start_position: Optional[Tuple[float, float]] = None,
+    polygon: ShapelyPolygon,
+    swath: float,
+    angle: float = 0.0,  # radians
+    start_position: Optional[Tuple[float, float]] = None,
 ) -> List[Tuple[float, float]]:
     if polygon.is_empty or swath <= 0:
         return []
@@ -78,7 +83,7 @@ def generate_boustrophedon_coverage(
         rot_pt = rotate(
             Point(start_position), -angle_deg, origin=centroid, use_radians=False
         )
-        sy, sx = rot_pt.y, rot_pt.x
+        sx, sy = rot_pt.x, rot_pt.y
         if abs(sy - rows[-1][0].centroid.y) < abs(sy - rows[0][0].centroid.y):
             rows.reverse()
         row0_xs = [s.centroid.x for s in rows[0]]
@@ -92,8 +97,7 @@ def generate_boustrophedon_coverage(
         ordered = list(segments)
         if not left_to_right:
             ordered = [
-                LineString(list(reversed(list(s.coords))))
-                for s in reversed(ordered)
+                LineString(list(reversed(list(s.coords)))) for s in reversed(ordered)
             ]
         for seg in ordered:
             cords: List[Tuple[float, float]] = [(x, y) for x, y in seg.coords]
@@ -114,16 +118,15 @@ def generate_boustrophedon_coverage(
     cx, cy = centroid.x, centroid.y
 
     return [
-        _rotate_point_back(px, py, cx, cy, cos_a, sin_a)
-        for px, py in waypoints_rot
+        _rotate_point_back(px, py, cx, cy, cos_a, sin_a) for px, py in waypoints_rot
     ]
 
 
 def generate_greedy_coverage(
-        polygon: ShapelyPolygon,
-        swath: float,
-        angle: float = 0.0,  # radians
-        start_position: Optional[Tuple[float, float]] = None,
+    polygon: ShapelyPolygon,
+    swath: float,
+    angle: float = 0.0,  # radians
+    start_position: Optional[Tuple[float, float]] = None,
 ) -> List[Tuple[float, float]]:
     if polygon.is_empty or swath <= 0:
         return []
@@ -208,8 +211,7 @@ def generate_greedy_coverage(
     cx, cy = centroid.x, centroid.y
 
     return [
-        _rotate_point_back(px, py, cx, cy, cos_a, sin_a)
-        for px, py in waypoints_rot
+        _rotate_point_back(px, py, cx, cy, cos_a, sin_a) for px, py in waypoints_rot
     ]
 
 
@@ -225,9 +227,9 @@ def path_length(path: List[Tuple[float, float]]) -> float:
 
 
 def decompose_field(
-        polygon: ShapelyPolygon,
-        swath: float,
-        angle: float = 0.0,  # degrees
+    polygon: ShapelyPolygon,
+    swath: float,
+    angle: float = 0.0,  # degrees
 ) -> Tuple[object, List, ShapelyPolygon]:
     from .bcd import bcd_slice_decompose, Cell as BcdCell
 
@@ -299,18 +301,37 @@ def _split_at_turns(path, angle_threshold=math.pi / 4):
 
 
 def apply_resource_limits(
-        path: List[Tuple[float, float]],
-        start_position: Tuple[float, float],
-        speed: float,
-        substance_rate: float = 0.0,
-        tank_volume: float = float("inf"),
-        max_flight_time: float = float("inf"),
-        turn_time: float = 1.0,
+    path: List[Tuple[float, float]],
+    start_position: Tuple[float, float],
+    speed: float,
+    substance_rate: float = 0.0,
+    tank_volume: float = float("inf"),
+    max_flight_time: float = float("inf"),
+    turn_time: float = 1.0,
+    obstacles_polygon=None,
 ) -> Tuple[List[Tuple[float, float]], int]:
     no_substance = substance_rate <= 0 or not math.isfinite(tank_volume)
     no_time = not math.isfinite(max_flight_time)
     if no_substance and no_time:
         return list(path), 0
+
+    _vis = None
+    if obstacles_polygon is not None and not obstacles_polygon.is_empty:
+        from .visibility_graph import VisibilityGraph
+
+        _vis = VisibilityGraph(obstacles_polygon)
+
+    def _rth_waypoints(from_pt: Tuple[float, float]) -> List[Tuple[float, float]]:
+        if _vis is not None:
+            return _vis.shortest_path(from_pt, start_position)
+        return [from_pt, start_position]
+
+    def _rth_path_length(from_pt: Tuple[float, float]) -> float:
+        wps = _rth_waypoints(from_pt)
+        return sum(
+            math.hypot(wps[i + 1][0] - wps[i][0], wps[i + 1][1] - wps[i][1])
+            for i in range(len(wps) - 1)
+        )
 
     segments = _split_at_turns(path)
     result = []
@@ -327,35 +348,42 @@ def apply_resource_limits(
             continue
         seg_length = path_length(seg)
         seg_substance = seg_length * substance_rate if not no_substance else 0.0
-        seg_time = (seg_length / speed if speed > 0 else 0.0) + (0.0 if after_rth else turn_time)
+        seg_time = (seg_length / speed if speed > 0 else 0.0) + (
+            0.0 if after_rth else turn_time
+        )
         end_pt = seg[-1]
-        rth_dist_end = math.hypot(end_pt[0] - start_position[0], end_pt[1] - start_position[1])
+        rth_dist_end = _rth_path_length(end_pt)
         rth_time_end = rth_dist_end / speed if speed > 0 else 0.0
 
         substance_ok = no_substance or (substance_used + seg_substance <= tank_volume)
-        time_ok = no_time or (flight_time_used + seg_time + rth_time_end <= max_flight_time)
+        time_ok = no_time or (
+            flight_time_used + seg_time + rth_time_end <= max_flight_time
+        )
 
         if not substance_ok or not time_ok:
-            home_dist = math.hypot(
-                current_pos[0] - start_position[0], current_pos[1] - start_position[1]
+            home_path = _rth_waypoints(current_pos)
+            home_dist = sum(
+                math.hypot(
+                    home_path[i + 1][0] - home_path[i][0],
+                    home_path[i + 1][1] - home_path[i][1],
+                )
+                for i in range(len(home_path) - 1)
             )
             home_time = home_dist / speed if speed > 0 else 0.0
-            can_reach_home = no_time or (flight_time_used + home_time <= max_flight_time)
+            can_reach_home = no_time or (
+                flight_time_used + home_time <= max_flight_time
+            )
             if can_reach_home and not after_rth:
-                last_real = next((p for p in reversed(result) if not math.isnan(p[0])), None)
                 if not result or not math.isnan(result[-1][0]):
                     result.append(_NAN)
-                if last_real is None or not _pts_eq(start_position, last_real):
-                    result.append(start_position)
+                result.extend(home_path[1:])
                 result.append(_NAN)
-                if not _pts_eq(current_pos, start_position):
-                    result.append(current_pos)
+                return_path = list(reversed(home_path))
+                result.extend(return_path[1:])  # skip start_position duplicate
+
                 rth_count += 1
                 substance_used = 0.0
-                return_dist = math.hypot(
-                    current_pos[0] - start_position[0], current_pos[1] - start_position[1]
-                )
-                flight_time_used = return_dist / speed if speed > 0 else 0.0
+                flight_time_used = home_dist / speed if speed > 0 else 0.0
                 seg_time = seg_length / speed if speed > 0 else 0.0
 
         last_real = next((p for p in reversed(result) if not math.isnan(p[0])), None)
