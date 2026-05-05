@@ -18,23 +18,22 @@ class JointOptimizer:
         return result.mission_time
 
     def optimize(
-            self,
-            initial_portions: list[float] = None,
-            algorithm: str = "sa",
-            # SA parameters
-            initial_temp: float = 1000.0,
-            final_temp: float = 1e-10,
-            cooling_rate: float = 0.95,
-            step_size: float = 0.1,
-            # Tabu Search parameters
-            tabu_tenure: int = 15,
-            num_neighbors: int = 5,
-            tabu_step_size: float = 0.05,
-            tabu_epsilon: float = 1e-3,
-            # Common
-            max_iterations: int = 1000,
-            seed: int | None = None,
-            iteration_callback: Any | None = None,
+        self,
+        initial_portions: list[float] = None,
+        algorithm: str = "sa",
+        # SA parameters
+        initial_temp: float = 1000.0,
+        final_temp: float = 1e-10,
+        step_size: float = 0.1,
+        # Tabu Search parameters
+        tabu_tenure: int = 15,
+        num_neighbors: int = 5,
+        tabu_step_size: float = 0.05,
+        tabu_epsilon: float = 1e-3,
+        # Common
+        max_iterations: int = 1000,
+        seed: int | None = None,
+        iteration_callback: Any | None = None,
     ) -> dict[str, Any]:
         if algorithm == "tabu":
             optimizer = TabuSearchOptimizer(
@@ -48,7 +47,6 @@ class JointOptimizer:
             optimizer = SimulatedAnnealingOptimizer(
                 initial_temp=initial_temp,
                 final_temp=final_temp,
-                cooling_rate=cooling_rate,
                 step_size=step_size,
                 random_seed=seed,
             )
@@ -60,15 +58,17 @@ class JointOptimizer:
             iteration_callback=iteration_callback,
         )
 
-        self._last_portions = opt_result['optimized_portions']
-        self._last_result = self.mission_optimizer.evaluate(self._last_portions)
+        self._last_portions = opt_result["optimized_portions"]
+        self._last_result = self.mission_optimizer.evaluate(
+            self._last_portions, exact=True
+        )
 
         return {
-            'optimized_portions': opt_result['optimized_portions'],
-            'best_time': opt_result['best_value'],
-            'iterations': opt_result['iterations'],
-            'final_temperature': opt_result['final_temperature'],
-            'final_mission_result': self._last_result
+            "optimized_portions": opt_result["optimized_portions"],
+            "best_time": opt_result["best_value"],
+            "iterations": opt_result["iterations"],
+            "final_temperature": opt_result["final_temperature"],
+            "final_mission_result": self._last_result,
         }
 
     def get_last_portions(self) -> list[float] | None:

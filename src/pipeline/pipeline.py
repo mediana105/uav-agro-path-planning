@@ -1,12 +1,13 @@
 import math
 
 from shapely.geometry import Polygon, box
+from shapely.geometry.base import BaseGeometry
 from shapely.ops import unary_union
 
 from ..angle_finders.altitude_optimizer import find_optimal_angle
 from ..decomposition.darp import DARP
 from ..decomposition.field_decomposition import FieldDecomposition
-from ..optimization.zone_snake import build_zone_snake, count_turns
+from ..path_planning.coverage_path import build_zone_snake, count_turns
 from ..path_planning.boustrophedon import apply_resource_limits, path_length
 from . import DroneConfig, MissionResult, ZoneResult
 
@@ -62,17 +63,18 @@ def calculate_portions_rth_aware(drone_configs, field_polygon: Polygon) -> list[
 
 
 class MissionOptimizer:
-
     def __init__(
-            self,
-            field_polygon: Polygon,
-            drones: list[DroneConfig],
-            cell_size: float = 1.0
+        self,
+        field_polygon: Polygon,
+        drones: list[DroneConfig],
+        cell_size: float = 1.0,
+        strategy: str = "greedy_safe",
     ):
         self.field_polygon = field_polygon
         self.drones = drones
         self.num_drones = len(drones)
         self.cell_size = cell_size
+        self.strategy = strategy
 
         self.initial_positions = [drone.start_position for drone in drones]
 
@@ -95,13 +97,10 @@ class MissionOptimizer:
         return row * self.grid_cols + col
 
     def _run_darp(self, portions: list[float]) -> DARP:
-        if not hasattr(self, 'field_decomp'):
+        if not hasattr(self, "field_decomp"):
             self._prepare_grid()
 
-        grid_positions = [
-            self._cords_to_index(x, y)
-            for x, y in self.initial_positions
-        ]
+        grid_positions = [self._cords_to_index(x, y) for x, y in self.initial_positions]
         _, _, obstacle_positions = self.field_decomp.to_darp_grid()
 
         darp = DARP(
@@ -118,7 +117,9 @@ class MissionOptimizer:
         darp.divideRegions()
         return darp
 
-    def _extract_zone_polygon(self, assignment_matrix, drone_id: int) -> Polygon:
+    def _extract_zone_polygon(
+        self, assignment_matrix, drone_id: int
+    ) -> Polygon | BaseGeometry:
         cells = []
 
         for row in range(self.grid_rows):
@@ -142,7 +143,7 @@ class MissionOptimizer:
 
         return zone
 
-    def evaluate(self, portions: list[float]) -> MissionResult:
+    def evaluate(self, portions: list[float], exact: bool = False) -> MissionResult:
         if portions is None:
             portions = calculate_portions_rth_aware(self.drones, self.field_polygon)
 
@@ -154,26 +155,36 @@ class MissionOptimizer:
             zone_polygon = self._extract_zone_polygon(darp.A, drone.id)
 
             if zone_polygon.is_empty:
-                zone_results.append(ZoneResult(
-                    drone_id=drone.id,
-                    zone_polygon=zone_polygon,
-                    optimal_angle=0.0,
-                    path=[],
-                    total_time=0.0
-                ))
+                zone_results.append(
+                    ZoneResult(
+                        drone_id=drone.id,
+                        zone_polygon=zone_polygon,
+                        optimal_angle=0.0,
+                        path=[],
+                        total_time=0.0,
+                    )
+                )
                 continue
 
-            if zone_polygon.geom_type == 'MultiPolygon':
+            if zone_polygon.geom_type == "MultiPolygon":
                 sub_polygons = list(zone_polygon.geoms)
             else:
                 sub_polygons = [zone_polygon]
 
-            optimal_angle = find_optimal_angle(max(sub_polygons, key=lambda g: g.area))
+            largest = max(sub_polygons, key=lambda g: g.area)
+            optimal_angle = find_optimal_angle(largest)
 
             path = []
             current_start = drone.start_position
             for sub_poly in sub_polygons:
-                sub_path, _, _ = build_zone_snake(sub_poly, drone.swath_width, angle_rad=optimal_angle, start_position=current_start)
+                sub_path, ang, _ = build_zone_snake(
+                    sub_poly,
+                    drone.swath_width,
+                    angle_rad=optimal_angle,
+                    start_position=current_start,
+                    strategy=self.strategy,
+                    exact=exact,
+                )
                 if not sub_path:
                     continue
                 path.extend(sub_path[1:] if path else sub_path)
@@ -189,19 +200,22 @@ class MissionOptimizer:
                 tank_volume=drone.tank_volume,
                 max_flight_time=drone.max_flight_time,
                 turn_time=drone.turn_time,
+                obstacles_polygon=zone_polygon,
             )
 
             num_turns = count_turns(path)
 
             total_time = _compute_drone_time(drone, path, num_turns)
 
-            zone_results.append(ZoneResult(
-                drone_id=drone.id,
-                zone_polygon=zone_polygon,
-                optimal_angle=optimal_angle,
-                path=path,
-                total_time=total_time,
-                rth_count=rth_count,
-            ))
+            zone_results.append(
+                ZoneResult(
+                    drone_id=drone.id,
+                    zone_polygon=zone_polygon,
+                    optimal_angle=optimal_angle,
+                    path=path,
+                    total_time=total_time,
+                    rth_count=rth_count,
+                )
+            )
 
         return MissionResult(zones=zone_results)

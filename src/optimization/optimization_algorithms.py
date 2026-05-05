@@ -36,16 +36,13 @@ class SimulatedAnnealingOptimizer:
     def __init__(self,
                  initial_temp: float = 1000.0,
                  final_temp: float = 1e-10,
-                 cooling_rate: float = 0.95,
                  step_size: float = 0.1,
                  random_seed: int = 1):
 
         self.initial_temp = initial_temp
         self.final_temp = final_temp
-        self.cooling_rate = cooling_rate
         self.step_size = step_size
         self.random = random.Random(random_seed)
-        np.random.seed(random_seed)
 
     def optimize(self,
                  objective_function: Callable[[list[float]], float],
@@ -59,10 +56,11 @@ class SimulatedAnnealingOptimizer:
         best_value = current_value
 
         temperature = self.initial_temp
+        cooling_rate = (self.final_temp / self.initial_temp) ** (1.0 / max_iterations)
 
         iteration = 0
 
-        while temperature > self.final_temp and iteration < max_iterations:
+        while iteration < max_iterations:
             neighbor_portions = self._generate_neighbor(current_portions)
             neighbor_value = objective_function(neighbor_portions)
             delta = neighbor_value - current_value
@@ -83,7 +81,7 @@ class SimulatedAnnealingOptimizer:
                     best_portions, best_value, temperature, accepted,
                 )
 
-            temperature *= self.cooling_rate
+            temperature *= cooling_rate
             iteration += 1
 
         return {
@@ -109,7 +107,6 @@ class TabuSearchOptimizer:
         self.step_size = step_size
         self.tabu_epsilon = tabu_epsilon
         self.random = random.Random(random_seed)
-        np.random.seed(random_seed)
 
     def optimize(self,
                  objective_function: Callable[[list[float]], float],

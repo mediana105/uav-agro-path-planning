@@ -31,7 +31,9 @@ class FieldDecomposition:
                 cy = min_y + (r + 0.5) * self.cell_size
                 point = Point(cx, cy)
 
-                if field_polygon.contains(point) and all(not h.contains(point) for h in holes):
+                if field_polygon.contains(point) and all(
+                    not h.contains(point) for h in holes
+                ):
                     self.field_map[r, c] = True
                 else:
                     self.field_map[r, c] = False
@@ -45,8 +47,6 @@ class FieldDecomposition:
             self.obstacles.append((row, col))
 
     def to_darp_grid(self):
-        obstacle_positions = [
-            r * self.grid_cols + c for r, c in self.obstacles
-        ]
+        obstacle_positions = [r * self.grid_cols + c for r, c in self.obstacles]
 
         return self.grid_rows, self.grid_cols, obstacle_positions

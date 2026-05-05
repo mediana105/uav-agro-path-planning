@@ -9,7 +9,7 @@ from numba import njit
 np.set_printoptions(threshold=sys.maxsize)
 
 random.seed(1)
-os.environ['PYTHONHASHSEED'] = str(1)
+os.environ["PYTHONHASHSEED"] = str(1)
 np.random.seed(1)
 
 
@@ -43,10 +43,7 @@ def inverse_binary_map_as_uint8(BinaryMap):
 @njit(fastmath=True)
 def euclidian_distance_points2d(array1: np.ndarray, array2: np.ndarray) -> np.float64:
     # this runs much faster than the (numba) np.linalg.norm and is totally enough for our purpose
-    return (
-            ((array1[0] - array2[0]) ** 2) +
-            ((array1[1] - array2[1]) ** 2)
-    ) ** 0.5
+    return (((array1[0] - array2[0]) ** 2) + ((array1[1] - array2[1]) ** 2)) ** 0.5
 
 
 @njit(fastmath=True)
@@ -69,7 +66,7 @@ def constructBinaryImages(labels_im, robo_start_point, rows, cols):
 def CalcConnectedMultiplier(rows, cols, dist1, dist2, CCvariation):
     returnM = np.zeros((rows, cols))
     MaxV = 0
-    MinV = 2 ** 30
+    MinV = 2**30
 
     for i in range(rows):
         for j in range(cols):
@@ -81,23 +78,42 @@ def CalcConnectedMultiplier(rows, cols, dist1, dist2, CCvariation):
 
     for i in range(rows):
         for j in range(cols):
-            returnM[i, j] = (returnM[i, j] - MinV) * ((2 * CCvariation) / (MaxV - MinV)) + (1 - CCvariation)
+            returnM[i, j] = (returnM[i, j] - MinV) * (
+                (2 * CCvariation) / (MaxV - MinV)
+            ) + (1 - CCvariation)
 
     return returnM
 
 
 class DARP:
-    def __init__(self, nx, ny, notEqualPortions, given_initial_positions, given_portions, obstacles_positions,
-                 visualization, MaxIter=80000, CCvariation=0.01,
-                 randomLevel=0.0001, dcells=2,
-                 importance=False):
+    def __init__(
+        self,
+        nx,
+        ny,
+        notEqualPortions,
+        given_initial_positions,
+        given_portions,
+        obstacles_positions,
+        visualization,
+        MaxIter=80000,
+        CCvariation=0.01,
+        randomLevel=0.0001,
+        dcells=2,
+        importance=False,
+    ):
 
         self.rows = nx
         self.cols = ny
-        self.initial_positions, self.obstacles_positions, self.portions = self.sanity_check(given_initial_positions,
-                                                                                            given_portions,
-                                                                                            obstacles_positions,
-                                                                                            notEqualPortions)
+        (
+            self.initial_positions,
+            self.obstacles_positions,
+            self.portions,
+        ) = self.sanity_check(
+            given_initial_positions,
+            given_portions,
+            obstacles_positions,
+            notEqualPortions,
+        )
 
         self.visualization = visualization
         self.MaxIter = MaxIter
@@ -117,10 +133,22 @@ class DARP:
         self.A = np.zeros((self.rows, self.cols))
         self.GridEnv = self.defineGridEnv()
 
-        self.connectivity = np.zeros((self.droneNo, self.rows, self.cols), dtype=np.uint8)
-        self.BinaryRobotRegions = np.zeros((self.droneNo, self.rows, self.cols), dtype=bool)
+        self.connectivity = np.zeros(
+            (self.droneNo, self.rows, self.cols), dtype=np.uint8
+        )
+        self.BinaryRobotRegions = np.zeros(
+            (self.droneNo, self.rows, self.cols), dtype=bool
+        )
 
-        self.MetricMatrix, self.termThr, self.Notiles, self.DesireableAssign, self.TilesImportance, self.MinimumImportance, self.MaximumImportance = self.construct_Assignment_Matrix()
+        (
+            self.MetricMatrix,
+            self.termThr,
+            self.Notiles,
+            self.DesireableAssign,
+            self.TilesImportance,
+            self.MinimumImportance,
+            self.MaximumImportance,
+        ) = self.construct_Assignment_Matrix()
         self.ArrayOfElements = np.zeros(self.droneNo)
         self.color = []
 
@@ -130,7 +158,9 @@ class DARP:
 
         np.random.seed(1)
 
-    def sanity_check(self, given_initial_positions, given_portions, obs_pos, notEqualPortions):
+    def sanity_check(
+        self, given_initial_positions, given_portions, obs_pos, notEqualPortions
+    ):
         initial_positions = []
         for position in given_initial_positions:
             if position < 0 or position >= self.rows * self.cols:
@@ -170,7 +200,9 @@ class DARP:
         return initial_positions, obstacles_positions, portions
 
     def defineGridEnv(self):
-        GridEnv = np.full(shape=(self.rows, self.cols), fill_value=-1)  # create non obstacle map with value -1
+        GridEnv = np.full(
+            shape=(self.rows, self.cols), fill_value=-1
+        )  # create non obstacle map with value -1
 
         # obstacle tiles value is -2
         for _idx, obstacle_pos in enumerate(self.obstacles_positions):
@@ -184,7 +216,9 @@ class DARP:
         num_labels, labels_im = cv2.connectedComponents(image, connectivity=4)
 
         if num_labels > 2:
-            print("The environment grid MUST not have unreachable and/or closed shape regions")
+            print(
+                "The environment grid MUST not have unreachable and/or closed shape regions"
+            )
             sys.exit(6)
 
         # initial robot tiles will have their array.index as value
@@ -201,7 +235,9 @@ class DARP:
         iteration = 0
 
         while self.termThr <= self.dcells and not success and not cancelled:
-            downThres = (self.Notiles - self.termThr * (self.droneNo - 1)) / (self.Notiles * self.droneNo)
+            downThres = (self.Notiles - self.termThr * (self.droneNo - 1)) / (
+                self.Notiles * self.droneNo
+            )
             upperThres = (self.Notiles + self.termThr) / (self.Notiles * self.droneNo)
 
             success = True
@@ -211,12 +247,14 @@ class DARP:
             iteration = 0
 
             while iteration <= self.MaxIter and not cancelled:
-                self.A, self.ArrayOfElements = assign(self.droneNo,
-                                                      self.rows,
-                                                      self.cols,
-                                                      self.GridEnv,
-                                                      self.MetricMatrix,
-                                                      self.A)
+                self.A, self.ArrayOfElements = assign(
+                    self.droneNo,
+                    self.rows,
+                    self.cols,
+                    self.GridEnv,
+                    self.MetricMatrix,
+                    self.A,
+                )
                 ConnectedMultiplierList = np.ones((self.droneNo, self.rows, self.cols))
                 ConnectedRobotRegions = np.zeros(self.droneNo)
                 plainErrors = np.zeros(self.droneNo)
@@ -226,19 +264,27 @@ class DARP:
                 for r in range(self.droneNo):
                     ConnectedMultiplier = np.ones((self.rows, self.cols))
                     ConnectedRobotRegions[r] = True
-                    num_labels, labels_im = cv2.connectedComponents(self.connectivity[r, :, :], connectivity=4)
+                    num_labels, labels_im = cv2.connectedComponents(
+                        self.connectivity[r, :, :], connectivity=4
+                    )
                     if num_labels > 2:
                         ConnectedRobotRegions[r] = False
-                        BinaryRobot, BinaryNonRobot = constructBinaryImages(labels_im, self.initial_positions[r],
-                                                                            self.rows, self.cols)
-                        ConnectedMultiplier = CalcConnectedMultiplier(self.rows, self.cols,
-                                                                      self.NormalizedEuclideanDistanceBinary(True,
-                                                                                                             BinaryRobot),
-                                                                      self.NormalizedEuclideanDistanceBinary(False,
-                                                                                                             BinaryNonRobot),
-                                                                      self.CCvariation)
+                        BinaryRobot, BinaryNonRobot = constructBinaryImages(
+                            labels_im, self.initial_positions[r], self.rows, self.cols
+                        )
+                        ConnectedMultiplier = CalcConnectedMultiplier(
+                            self.rows,
+                            self.cols,
+                            self.NormalizedEuclideanDistanceBinary(True, BinaryRobot),
+                            self.NormalizedEuclideanDistanceBinary(
+                                False, BinaryNonRobot
+                            ),
+                            self.CCvariation,
+                        )
                     ConnectedMultiplierList[r, :, :] = ConnectedMultiplier
-                    plainErrors[r] = self.ArrayOfElements[r] / (self.DesireableAssign[r] * self.droneNo)
+                    plainErrors[r] = self.ArrayOfElements[r] / (
+                        self.DesireableAssign[r] * self.droneNo
+                    )
                     if plainErrors[r] < downThres:
                         divFairError[r] = downThres - plainErrors[r]
                     elif plainErrors[r] > upperThres:
@@ -261,22 +307,28 @@ class DARP:
                 for r in range(self.droneNo):
                     if totalNegPlainErrors != 0:
                         if divFairError[r] < 0:
-                            correctionMult[r] = 1 + (plainErrors[r] / totalNegPlainErrors) * (TotalNegPerc / 2)
+                            correctionMult[r] = 1 + (
+                                plainErrors[r] / totalNegPlainErrors
+                            ) * (TotalNegPerc / 2)
                         else:
-                            correctionMult[r] = 1 - (plainErrors[r] / totalNegPlainErrors) * (TotalNegPerc / 2)
+                            correctionMult[r] = 1 - (
+                                plainErrors[r] / totalNegPlainErrors
+                            ) * (TotalNegPerc / 2)
 
                         criterionMatrix = self.calculateCriterionMatrix(
                             self.TilesImportance[r],
                             self.MinimumImportance[r],
                             self.MaximumImportance[r],
                             correctionMult[r],
-                            divFairError[r] < 0)
+                            divFairError[r] < 0,
+                        )
 
                     self.MetricMatrix[r] = self.FinalUpdateOnMetricMatrix(
                         criterionMatrix,
                         self.generateRandomMatrix(),
                         self.MetricMatrix[r],
-                        ConnectedMultiplierList[r, :, :])
+                        ConnectedMultiplierList[r, :, :],
+                    )
 
                 iteration += 1
 
@@ -295,7 +347,9 @@ class DARP:
 
     def generateRandomMatrix(self):
         RandomMatrix = np.zeros((self.rows, self.cols))
-        RandomMatrix = 2 * self.randomLevel * np.random.uniform(0, 1, size=RandomMatrix.shape) + (1 - self.randomLevel)
+        RandomMatrix = 2 * self.randomLevel * np.random.uniform(
+            0, 1, size=RandomMatrix.shape
+        ) + (1 - self.randomLevel)
         return RandomMatrix
 
     def FinalUpdateOnMetricMatrix(self, CM, RM, currentOne, CC):
@@ -306,12 +360,17 @@ class DARP:
 
     def IsThisAGoalState(self, thresh, connectedRobotRegions):
         for r in range(self.droneNo):
-            if np.absolute(self.DesireableAssign[r] - self.ArrayOfElements[r]) > thresh or not connectedRobotRegions[r]:
+            if (
+                np.absolute(self.DesireableAssign[r] - self.ArrayOfElements[r]) > thresh
+                or not connectedRobotRegions[r]
+            ):
                 return False
         return True
 
     def update_connectivity(self):
-        self.connectivity = np.zeros((self.droneNo, self.rows, self.cols), dtype=np.uint8)
+        self.connectivity = np.zeros(
+            (self.droneNo, self.rows, self.cols), dtype=np.uint8
+        )
         for i in range(self.droneNo):
             mask = np.where(self.A == i)
             self.connectivity[i, mask[0], mask[1]] = 255
@@ -342,8 +401,9 @@ class DARP:
             for y in range(self.cols):
                 tempSum = 0
                 for r in range(self.droneNo):
-                    AllDistances[r, x, y] = euclidian_distance_points2d(np.array(self.initial_positions[r]),
-                                                                        np.array((x, y)))  # E!
+                    AllDistances[r, x, y] = euclidian_distance_points2d(
+                        np.array(self.initial_positions[r]), np.array((x, y))
+                    )  # E!
                     if AllDistances[r, x, y] > MaximunDist[r]:
                         MaximunDist[r] = AllDistances[r, x, y]
                     tempSum += AllDistances[r, x, y]
@@ -360,25 +420,46 @@ class DARP:
                     if TilesImportance[r, x, y] < MinimumImportance[r]:
                         MinimumImportance[r] = TilesImportance[r, x, y]
 
-        return AllDistances, termThr, Notiles, DesireableAssign, TilesImportance, MinimumImportance, MaximumImportance
+        return (
+            AllDistances,
+            termThr,
+            Notiles,
+            DesireableAssign,
+            TilesImportance,
+            MinimumImportance,
+            MaximumImportance,
+        )
 
-    def calculateCriterionMatrix(self, TilesImportance, MinimumImportance, MaximumImportance, correctionMult,
-                                 smallerthan_zero, ):
+    def calculateCriterionMatrix(
+        self,
+        TilesImportance,
+        MinimumImportance,
+        MaximumImportance,
+        correctionMult,
+        smallerthan_zero,
+    ):
         returnCrit = np.zeros((self.rows, self.cols))
         if self.importance:
             if smallerthan_zero:
                 returnCrit = (TilesImportance - MinimumImportance) * (
-                        (correctionMult - 1) / (MaximumImportance - MinimumImportance)) + 1
+                    (correctionMult - 1) / (MaximumImportance - MinimumImportance)
+                ) + 1
             else:
                 returnCrit = (TilesImportance - MinimumImportance) * (
-                        (1 - correctionMult) / (MaximumImportance - MinimumImportance)) + correctionMult
+                    (1 - correctionMult) / (MaximumImportance - MinimumImportance)
+                ) + correctionMult
         else:
             returnCrit[:, :] = correctionMult
 
         return returnCrit
 
     def NormalizedEuclideanDistanceBinary(self, RobotR, BinaryMap):
-        distRobot = cv2.distanceTransform(inverse_binary_map_as_uint8(BinaryMap), distanceType=2, maskSize=0, dstType=5)
+        distRobot = cv2.distanceTransform(
+            inverse_binary_map_as_uint8(BinaryMap),
+            distanceType=2,
+            maskSize=0,
+            dstType=5,
+        )
         MaxV = float(np.max(distRobot))
         MinV = float(np.min(distRobot))
 

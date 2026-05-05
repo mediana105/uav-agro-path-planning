@@ -24,8 +24,8 @@ def _as_polygon(geom: ShapelyPolygon | MultiPolygon) -> ShapelyPolygon:
 
 
 def bcd_critical_x_values(
-        safe_area: ShapelyPolygon | MultiPolygon,
-        merge_eps: float | None = None,
+    safe_area: ShapelyPolygon | MultiPolygon,
+    merge_eps: float | None = None,
 ) -> list[float]:
     safe_area = _as_polygon(safe_area)
     if safe_area.is_empty:
@@ -52,12 +52,12 @@ def bcd_critical_x_values(
 
 
 def _strip_pieces(
-        polygon: ShapelyPolygon,
-        x_left: float,
-        x_right: float,
-        miny: float,
-        maxy: float,
-        margin: float,
+    polygon: ShapelyPolygon,
+    x_left: float,
+    x_right: float,
+    miny: float,
+    maxy: float,
+    margin: float,
 ) -> list[ShapelyPolygon]:
     if x_right - x_left < 1e-12:
         return []
@@ -76,7 +76,9 @@ def _strip_pieces(
         if geom.area > 1e-9:
             pieces.append(geom)
     elif isinstance(geom, MultiPolygon):
-        pieces = [p for p in geom.geoms if isinstance(p, ShapelyPolygon) and p.area > 1e-9]
+        pieces = [
+            p for p in geom.geoms if isinstance(p, ShapelyPolygon) and p.area > 1e-9
+        ]
     elif hasattr(geom, "geoms"):
         for g in geom.geoms:
             if isinstance(g, ShapelyPolygon) and g.area > 1e-9:
@@ -94,7 +96,9 @@ def _strip_pieces(
     return clean
 
 
-def bcd_slice_decompose(safe_area: ShapelyPolygon | MultiPolygon, swath: float) -> list[Cell]:
+def bcd_slice_decompose(
+    safe_area: ShapelyPolygon | MultiPolygon, swath: float
+) -> list[Cell]:
     safe_area = _as_polygon(safe_area)
     if safe_area.is_empty:
         return []
@@ -209,10 +213,10 @@ def _merge_cells(cells: list[Cell]) -> list[Cell]:
                     continue
 
                 if not (
-                        isinstance(union, ShapelyPolygon)
-                        and union.is_valid
-                        and not list(union.interiors)
-                        and union.area > 1e-9
+                    isinstance(union, ShapelyPolygon)
+                    and union.is_valid
+                    and not list(union.interiors)
+                    and union.area > 1e-9
                 ):
                     continue
                 keep_idx = min(l_set)
@@ -320,7 +324,7 @@ def _two_opt_order(cells: list[Cell], order: list[int]) -> list[int]:
                 if j + 1 < n:
                     after += d(best[i], best[j + 1])
                 if after < before - 1e-9:
-                    best[i:j + 1] = best[i:j + 1][::-1]
+                    best[i : j + 1] = best[i : j + 1][::-1]
                     improved = True
                     break
             if improved:
