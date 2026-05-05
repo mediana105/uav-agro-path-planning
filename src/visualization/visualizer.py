@@ -153,52 +153,17 @@ class MissionVisualizer:
             initial_portions,
             title="Initial Decomposition\n(productivity‑based portions)",
         )
-        plt.ion()
-        plt.show()
-        plt.pause(0.05)
 
         joint = JointOptimizer(self._optimizer)
-        _best_seen = [float("inf")]
-
-        def _on_iter(
-            iteration,
-            _cur_portions,
-            _cur_value,
-            best_portions,
-            best_value,
-            temp,
-            _accepted,
-        ):
-            if best_value < _best_seen[0]:
-                _best_seen[0] = best_value
-                result = joint.get_last_mission_result()
-                ax_opt.cla()
-                if algorithm == "tabu":
-                    iter_title = (
-                        f"Tabu Search — iter {iteration + 1} / {sa_iterations}\n"
-                        f"t_best = {best_value:.1f} s"
-                    )
-                else:
-                    iter_title = (
-                        f"SA — iter {iteration + 1} / {sa_iterations}\n"
-                        f"t_best = {best_value:.1f} s   T = {temp:.2f}"
-                    )
-                self.draw_panel(ax_opt, result, list(best_portions), title=iter_title)
-                fig.canvas.draw()
-                plt.pause(0.02)
-
         meta = joint.optimize(
             initial_portions=initial_portions,
             algorithm=algorithm,
             max_iterations=sa_iterations,
             seed=sa_seed,
-            iteration_callback=_on_iter,
         )
         opt_portions = meta["optimized_portions"]
         opt_result = meta["final_mission_result"]
 
-        plt.ioff()
-        ax_opt.cla()
         self.draw_panel(
             ax_opt,
             opt_result,
