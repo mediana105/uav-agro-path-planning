@@ -101,7 +101,7 @@ def bcd_slice_decompose(safe_area: ShapelyPolygon | MultiPolygon, swath: float) 
 
     minx, miny, maxx, maxy = safe_area.bounds
     margin = max((maxy - miny) * 0.1, swath, 10.0)
-    critical_xs = bcd_critical_x_values(safe_area, merge_eps=swath * 0.5)
+    critical_xs = bcd_critical_x_values(safe_area, merge_eps=swath * 1e-3)
     if len(critical_xs) < 2:
         return []
 

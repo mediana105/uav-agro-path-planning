@@ -1,3 +1,5 @@
+import math
+
 from ..path_planning.boustrophedon import generate_boustrophedon_coverage, path_length
 
 
@@ -14,7 +16,7 @@ def find_angle_by_bruteforce(
     angle = angle_min
 
     while angle < angle_max:
-        path = generate_boustrophedon_coverage(polygon, swath, angle)
+        path = generate_boustrophedon_coverage(polygon, swath, math.radians(angle))
 
         if len(path) < 2:
             angle += step_deg
