@@ -3,139 +3,111 @@ import math
 from shapely.affinity import rotate
 from shapely.geometry import Polygon
 
+_SWEEP_DEGENERACY_RAD = 1e-7
+
 
 def get_general_altitude(p: Polygon, theta: float) -> float:
-    """
-    Calculate general altitude (width) of polygon in given direction using scanning line algorithm.
-
-    Based on: Stanislav Bochkarev, Stephen L. Smith.
-    "On Minimizing Turns in Robot Coverage Path Planning"
-    """
-    # Step 1: Initialize counters
-    counter = 0
-    alpha = 0.0
-
-    # Step 2: Rotate polygon to align with scanning direction
     centroid = p.centroid
-    p_rot = rotate(p, -theta, origin=centroid, use_radians=True)
+    p_rot = rotate(
+        p,
+        -(theta + _SWEEP_DEGENERACY_RAD),
+        origin=centroid,
+        use_radians=True,
+    )
 
-    # Step 3: Collect all vertices with their neighbors
     all_vertices = []
 
-    # Process exterior boundary
-    exterior_cords = list(p_rot.exterior.coords)
-    n_exterior = len(exterior_cords) - 1
+    exterior_coords = list(p_rot.exterior.coords)
+    n = len(exterior_coords) - 1
+    for i in range(n):
+        x, y = exterior_coords[i]
+        _, prev_y = exterior_coords[(i - 1) % n]
+        _, next_y = exterior_coords[(i + 1) % n]
+        all_vertices.append(
+            {"y": y, "prev_y": prev_y, "next_y": next_y, "interior": False}
+        )
 
-    for i in range(n_exterior):
-        x, y = exterior_cords[i]
-        prev_x, prev_y = exterior_cords[(i - 1) % n_exterior]
-        next_x, next_y = exterior_cords[(i + 1) % n_exterior]
+    for ring in p_rot.interiors:
+        hole_coords = list(ring.coords)
+        m = len(hole_coords) - 1
+        for i in range(m):
+            x, y = hole_coords[i]
+            _, prev_y = hole_coords[(i - 1) % m]
+            _, next_y = hole_coords[(i + 1) % m]
+            all_vertices.append(
+                {"y": y, "prev_y": prev_y, "next_y": next_y, "interior": True}
+            )
 
-        all_vertices.append({
-            'x': x, 'y': y,
-            'prev_x': prev_x, 'next_x': next_x,
-            'type': 'exterior'
-        })
+    all_vertices.sort(key=lambda v: v["y"])
 
-    # Step 4: Process interior boundaries (holes)
-    for interior in p_rot.interiors:
-        interior_cords = list(interior.coords)
-        n_interior = len(interior_cords) - 1
+    counter = 0
+    alpha = 0.0
+    prev_y = None
 
-        for i in range(n_interior):
-            x, y = interior_cords[i]
-            prev_x, prev_y = interior_cords[(i - 1) % n_interior]
-            next_x, next_y = interior_cords[(i + 1) % n_interior]
+    for i, v in enumerate(all_vertices):
+        y = v["y"]
+        prev_y_v = v["prev_y"]
+        next_y_v = v["next_y"]
+        is_interior = v["interior"]
 
-            all_vertices.append({
-                'x': x, 'y': y,
-                'prev_x': prev_x, 'next_x': next_x,
-                'type': 'interior'
-            })
-
-    # Step 5: Sort vertices by x-coordinate for scanning
-    all_vertices.sort(key=lambda v: v['x'])
-
-    # Step 6: Scan from left to right
-    prev_x = None
-
-    for i, vertex in enumerate(all_vertices):
-        x = vertex['x']
-        prev_x_i = vertex['prev_x']
-        next_x_i = vertex['next_x']
-
-        # Step 7: Handle first vertex
         if i == 0:
-            prev_x = x
-            # Count initial intersections
-            if prev_x_i > x and next_x_i > x:
+            prev_y = y
+            both_above = prev_y_v > y and next_y_v > y
+            both_below = prev_y_v < y and next_y_v < y
+            if both_above:
                 counter += 1
-            elif prev_x_i < x and next_x_i < x:
+            elif both_below:
                 counter -= 1
             continue
 
-        # Step 8: Accumulate altitude
-        # alpha += (number of active segments) * (distance moved)
-        delta_x = x - prev_x
-        alpha += counter * delta_x
+        alpha += counter * (y - prev_y)
 
-        # Step 9: Update intersection counter
-        # Check if vertex represents an edge crossing
-        both_on_right = (prev_x_i > x) and (next_x_i > x)  # Edge to the right
-        both_on_left = (prev_x_i < x) and (next_x_i < x)  # Edge to the left
+        both_above = prev_y_v > y and next_y_v > y
+        both_below = prev_y_v < y and next_y_v < y
 
-        if both_on_right:
-            # Step 10: Scan line enters polygon
+        if both_above:
             counter += 1
-        elif both_on_left:
-            # Step 11: Scan line exits polygon
+        elif both_below:
             counter -= 1
 
-        prev_x = x
+        prev_y = y
 
-    # Step 12: Return absolute altitude value
-    return abs(alpha)
+    return alpha
+
+
+def minimum_altitude(polygon: Polygon) -> tuple[float, float]:
+    if polygon.is_empty or polygon.area <= 0:
+        return 0.0, 0.0
+
+    best_angle = 0.0
+    min_alt = float("inf")
+
+    all_boundaries = [polygon.exterior.coords]
+    for interior in polygon.interiors:
+        all_boundaries.append(interior.coords)
+
+    for boundary_coords in all_boundaries:
+        coords = list(boundary_coords)
+        for i in range(len(coords) - 1):
+            x1, y1 = coords[i]
+            x2, y2 = coords[i + 1]
+            dx, dy = x2 - x1, y2 - y1
+            side_angle = math.atan2(dy, dx)
+            cur_angle = (side_angle + math.pi / 2) % math.pi
+
+            altitude = get_general_altitude(polygon, cur_angle)
+            if altitude < min_alt:
+                min_alt = altitude
+                best_angle = cur_angle
+
+    return min_alt, best_angle
 
 
 def find_optimal_angle(polygon: Polygon) -> float:
-    """
-    Find optimal angle that minimizes altitude (and thus turns) for coverage path.
+    return minimum_altitude(polygon)[1]
 
-    Theorem: Optimal direction is orthogonal to one of polygon edges.
-    """
-    best_angle = 0.0
-    min_altitude = float('inf')
 
-    # Collect all boundaries to check
-    all_boundaries = [polygon.exterior.coords]  # Exterior boundary
-    for interior in polygon.interiors:  # Interior boundaries (holes)
-        all_boundaries.append(interior.coords)
-
-    # Check angles orthogonal to each edge
-    for boundary_cords in all_boundaries:
-        cords = list(boundary_cords)
-        for i in range(len(cords) - 1):
-            # Calculate edge angle
-            x1, y1 = cords[i]
-            x2, y2 = cords[i + 1]
-            dx, dy = x2 - x1, y2 - y1
-
-            # Calculate edge direction angle
-            side_angle = math.atan2(dy, dx)
-
-            # Calculate orthogonal coverage angle
-            # Coverage lines are perpendicular to edges
-            cur_angle = side_angle + math.pi / 2
-
-            # Normalize angle to [0, π) range
-            cur_angle = cur_angle % math.pi
-
-            # Calculate altitude for this angle
-            altitude = get_general_altitude(polygon, cur_angle)
-
-            # Update best angle if this is better
-            if altitude < min_altitude:
-                min_altitude = altitude
-                best_angle = cur_angle
-
-    return best_angle
+def num_parallel_passes(alpha: float, stripe_spacing: float) -> int:
+    if stripe_spacing <= 0 or alpha <= 0:
+        return 0
+    return max(1, int(math.ceil(alpha / stripe_spacing)))
