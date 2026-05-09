@@ -4,7 +4,7 @@ import math
 from dataclasses import dataclass, field
 
 from shapely.errors import GEOSException
-from shapely.geometry import MultiPolygon, box
+from shapely.geometry import LineString, MultiPolygon, box
 from shapely.geometry import Polygon as ShapelyPolygon
 
 
@@ -17,6 +17,37 @@ class Cell:
     neighbours: set[int] = field(default_factory=set)
 
 
+def _is_y_monotone(polygon: ShapelyPolygon) -> bool:
+    coords = list(polygon.exterior.coords)[:-1]
+    vertex_ys = sorted({c[1] for c in coords})
+    if len(vertex_ys) < 2:
+        return True
+
+    minx, miny, maxx, maxy = polygon.bounds
+    margin = (maxx - minx) + 1.0
+
+    for y in vertex_ys[1:-1]:  # extremes never cause a split
+        for dy in (-1e-9, 1e-9):
+            test_y = y + dy
+            if not (miny < test_y < maxy):
+                continue
+            sweep = LineString([(minx - margin, test_y), (maxx + margin, test_y)])
+            try:
+                inter = polygon.intersection(sweep)
+            except GEOSException:
+                continue
+            if inter.is_empty:
+                continue
+            if inter.geom_type == "MultiLineString":
+                if sum(1 for g in inter.geoms if g.length > 1e-9) > 1:  # type: ignore[union-attr]
+                    return False
+            elif inter.geom_type == "GeometryCollection":
+                if sum(1 for g in inter.geoms  # type: ignore[union-attr]
+                       if g.geom_type == "LineString" and g.length > 1e-9) > 1:
+                    return False
+    return True
+
+
 def _as_polygon(geom: ShapelyPolygon | MultiPolygon) -> ShapelyPolygon:
     if isinstance(geom, MultiPolygon):
         return max(geom.geoms, key=lambda g: g.area)
@@ -24,8 +55,8 @@ def _as_polygon(geom: ShapelyPolygon | MultiPolygon) -> ShapelyPolygon:
 
 
 def bcd_critical_x_values(
-    safe_area: ShapelyPolygon | MultiPolygon,
-    merge_eps: float | None = None,
+        safe_area: ShapelyPolygon | MultiPolygon,
+        merge_eps: float | None = None,
 ) -> list[float]:
     safe_area = _as_polygon(safe_area)
     if safe_area.is_empty:
@@ -52,12 +83,12 @@ def bcd_critical_x_values(
 
 
 def _strip_pieces(
-    polygon: ShapelyPolygon,
-    x_left: float,
-    x_right: float,
-    miny: float,
-    maxy: float,
-    margin: float,
+        polygon: ShapelyPolygon,
+        x_left: float,
+        x_right: float,
+        miny: float,
+        maxy: float,
+        margin: float,
 ) -> list[ShapelyPolygon]:
     if x_right - x_left < 1e-12:
         return []
@@ -97,7 +128,7 @@ def _strip_pieces(
 
 
 def bcd_slice_decompose(
-    safe_area: ShapelyPolygon | MultiPolygon, swath: float
+        safe_area: ShapelyPolygon | MultiPolygon, swath: float
 ) -> list[Cell]:
     safe_area = _as_polygon(safe_area)
     if safe_area.is_empty:
@@ -204,6 +235,8 @@ def _merge_cells(cells: list[Cell]) -> list[Cell]:
                 all_ids = l_set | r_set
                 if len(all_ids) < 2:
                     continue
+                if len(l_set) < len(r_set):
+                    continue
                 try:
                     it = iter(all_ids)
                     union = active[next(it)].poly
@@ -213,10 +246,11 @@ def _merge_cells(cells: list[Cell]) -> list[Cell]:
                     continue
 
                 if not (
-                    isinstance(union, ShapelyPolygon)
-                    and union.is_valid
-                    and not list(union.interiors)
-                    and union.area > 1e-9
+                        isinstance(union, ShapelyPolygon)
+                        and union.is_valid
+                        and not list(union.interiors)
+                        and union.area > 1e-9
+                        and _is_y_monotone(union)
                 ):
                     continue
                 keep_idx = min(l_set)
@@ -324,7 +358,7 @@ def _two_opt_order(cells: list[Cell], order: list[int]) -> list[int]:
                 if j + 1 < n:
                     after += d(best[i], best[j + 1])
                 if after < before - 1e-9:
-                    best[i : j + 1] = best[i : j + 1][::-1]
+                    best[i: j + 1] = best[i: j + 1][::-1]
                     improved = True
                     break
             if improved:
