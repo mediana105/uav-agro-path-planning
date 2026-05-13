@@ -101,6 +101,10 @@ class VisibilityGraph:
         return path
 
 
+class SimplePolygonInteriorVG(VisibilityGraph):
+    pass
+
+
 def _transition_waypoints(
     start: tuple[float, float],
     end: tuple[float, float],

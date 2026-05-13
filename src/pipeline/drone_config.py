@@ -11,6 +11,8 @@ class DroneConfig:
 
     start_position: tuple[float, float] = None
 
+    bcd_coalesce_to: int | None = None
+
     substance_rate: float = 0.0  # spray consumption, L/m  (0 = spraying disabled)
     tank_volume: float = field(default_factory=lambda: math.inf)  # tank capacity, L
     max_flight_time: float = field(
@@ -26,6 +28,12 @@ class DroneConfig:
             raise ValueError(f"Turn time cannot be negative, got {self.turn_time}")
         if self.start_position is None:
             raise ValueError("start_position is required")
+        if self.bcd_coalesce_to is not None:
+            if not isinstance(self.bcd_coalesce_to, int) or self.bcd_coalesce_to < 1:
+                raise ValueError(
+                    "bcd_coalesce_to must be None or a positive int, "
+                    f"got {self.bcd_coalesce_to!r}"
+                )
         if self.substance_rate < 0:
             raise ValueError(
                 f"substance_rate cannot be negative, got {self.substance_rate}"

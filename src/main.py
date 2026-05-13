@@ -116,6 +116,10 @@ def main():
     vis.save_bcd_decomposition_figure(sa_result, dec_path)
     print(f"[main] BCD decomposition figure saved in {dec_path}")
 
+    adj_path = str(out_dir / "bcd_adjacency.png")
+    vis.save_bcd_adjacency_figure(sa_result, adj_path)
+    print(f"[main] BCD adjacency graph saved in {adj_path}")
+
     if not args.no_video:
         print(f"[main] Generating animation (speed x{args.speed})...")
         vis.simulate(

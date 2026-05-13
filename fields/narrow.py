@@ -24,19 +24,45 @@ FIELD = Polygon(
 )
 
 DRONES = [
-    DroneConfig(id=0, speed=7.5, swath_width=5.0, turn_time=1.5,
-                start_position=(114.0, 35.0)),
-    DroneConfig(id=1, speed=6.0, swath_width=5.0, turn_time=1.8,
-                start_position=(295.0, 35.0),
-                substance_rate=0.4, tank_volume=180.0, max_flight_time=150.0),
-    DroneConfig(id=2, speed=6.0, swath_width=4.5, turn_time=2.0,
-                start_position=(443.0, 35.0),
-                substance_rate=0.45, tank_volume=160.0, max_flight_time=140.0),
-    DroneConfig(id=3, speed=5.0, swath_width=4.0, turn_time=2.5,
-                start_position=(490.0, 35.0),
-                substance_rate=0.5, tank_volume=130.0, max_flight_time=120.0),
+    DroneConfig(
+        id=0,
+        speed=7.5,
+        swath_width=5.0,
+        turn_time=1.5,
+        start_position=(114.0, 35.0),
+    ),
+    DroneConfig(
+        id=1,
+        speed=6.0,
+        swath_width=5.0,
+        turn_time=1.8,
+        start_position=(295.0, 35.0),
+        substance_rate=0.4,
+        tank_volume=180.0,
+        max_flight_time=150.0,
+    ),
+    DroneConfig(
+        id=2,
+        speed=6.0,
+        swath_width=4.5,
+        turn_time=2.0,
+        start_position=(443.0, 35.0),
+        substance_rate=0.45,
+        tank_volume=160.0,
+        max_flight_time=140.0,
+    ),
+    DroneConfig(
+        id=3,
+        speed=5.0,
+        swath_width=4.0,
+        turn_time=2.5,
+        start_position=(490.0, 35.0),
+        substance_rate=0.5,
+        tank_volume=130.0,
+        max_flight_time=120.0,
+    ),
 ]
 
-CELL_SIZE     = 4.0
+CELL_SIZE     = 2.0
 SA_ITERATIONS = 200
 SA_SEED       = 17

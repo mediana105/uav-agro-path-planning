@@ -158,6 +158,11 @@ class DARP:
 
         np.random.seed(1)
 
+        self._initial_MaxIter = MaxIter
+        self._initial_MetricMatrix = self.MetricMatrix.copy()
+        self._initial_A = self.A.copy()
+        self._initial_termThr = self.termThr
+
     def sanity_check(
         self, given_initial_positions, given_portions, obs_pos, notEqualPortions
     ):
@@ -198,6 +203,38 @@ class DARP:
                     sys.exit(5)
 
         return initial_positions, obstacles_positions, portions
+
+    def update_portions(self, portions, reset_state: bool = True) -> None:
+        if len(portions) != self.droneNo:
+            raise ValueError(
+                f"Expected {self.droneNo} portions, got {len(portions)}"
+            )
+        s = sum(portions)
+        if abs(s - 1) >= 1e-4:
+            raise ValueError(f"Sum of portions must equal 1 (got {s})")
+
+        self.portions = list(portions)
+        self.notEqualPortions = True
+
+        effectiveSize = self.Notiles - self.droneNo - len(self.obstacles_positions)
+        termThr = 1 if effectiveSize % self.droneNo != 0 else 0
+        for i in range(self.droneNo):
+            self.DesireableAssign[i] = effectiveSize * self.portions[i]
+            if (
+                self.DesireableAssign[i] != int(self.DesireableAssign[i])
+                and termThr != 1
+            ):
+                termThr = 1
+        self._initial_termThr = termThr
+        self.termThr = termThr
+
+        if reset_state:
+            self.MaxIter = self._initial_MaxIter
+            np.copyto(self.MetricMatrix, self._initial_MetricMatrix)
+            np.copyto(self.A, self._initial_A)
+            self.ArrayOfElements.fill(0.0)
+            self.BinaryRobotRegions.fill(False)
+            np.random.seed(1)
 
     def defineGridEnv(self):
         GridEnv = np.full(

@@ -19,4 +19,6 @@ class MissionResult:
 
     @property
     def mission_time(self) -> float:
+        if not self.zones:
+            return 0.0
         return max(z.total_time for z in self.zones)

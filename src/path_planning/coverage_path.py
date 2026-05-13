@@ -1,11 +1,20 @@
 import math
 
 from shapely.affinity import rotate as _shapely_rotate
-from shapely.geometry import LineString, Point, Polygon
+from shapely.geometry import LineString, MultiPolygon, Point, Polygon
 
 from ..angle_finders.altitude_optimizer import find_optimal_angle
 from ..path_planning.boustrophedon import _extract_linestring
 from .visibility_graph import VisibilityGraph
+
+
+def _polygon_for_optimal_angle(geom: Polygon | MultiPolygon) -> Polygon:
+    if geom.is_empty:
+        return Polygon()
+    if isinstance(geom, MultiPolygon):
+        parts = [g for g in geom.geoms if not g.is_empty and g.area > 0]
+        return max(parts, key=lambda p: p.area) if parts else Polygon()
+    return geom
 
 
 def _greedy_order_subpolygons(
@@ -203,148 +212,167 @@ def _two_opt_swaths(
     return best
 
 
-def _bcd_snake_path(
-    polygon: Polygon,
+def _spray_centerline_corridor(zone: Polygon, swath_width: float) -> Polygon | MultiPolygon:
+    if zone.is_empty or swath_width <= 0:
+        return Polygon()
+    return zone.buffer(-swath_width / 2.0)
+
+
+def _normalize_spray_corridor(
+    corridor: Polygon | MultiPolygon,
     swath_width: float,
-    angle_rad: float,
-    start_position: tuple[float, float],
-    exact: bool = False,
-) -> list[tuple[float, float]]:
-    from ..path_planning.bcd import bcd_slice_decompose
+) -> Polygon | MultiPolygon:
+    if corridor.is_empty or not isinstance(corridor, MultiPolygon):
+        return corridor
 
-    centroid = polygon.centroid
-    angle_deg = math.degrees(angle_rad)
+    parts = [p for p in corridor.geoms if not p.is_empty and p.area > 1e-12]
+    if len(parts) <= 1:
+        return corridor
 
-    rotated_poly = _shapely_rotate(
-        polygon, -angle_deg, origin=centroid, use_radians=False
-    )
-    rotated_poly = rotated_poly.buffer(-swath_width / 2.0)
-    if rotated_poly.is_empty:
-        return []
-    rot_start_pt = _shapely_rotate(
-        Point(start_position), -angle_deg, origin=centroid, use_radians=False
-    )
-    rot_start = (rot_start_pt.x, rot_start_pt.y)
+    keep: list[Polygon] = []
+    area_tol = max((swath_width ** 2) * 0.5, 1e-6)
+    cover_gap_tol = max(swath_width * 0.5, 1e-6)
 
-    cells = bcd_slice_decompose(rotated_poly, swath_width)
-    if not cells:
-        return _greedy_safe_path(
-            polygon, swath_width, angle_rad, start_position, exact=exact
+    for i, part in enumerate(parts):
+        nearest_other = min(
+            (part.distance(other) for j, other in enumerate(parts) if j != i),
+            default=math.inf,
         )
+        drop_as_coverable_island = (
+            part.area <= area_tol
+            and nearest_other <= cover_gap_tol
+        )
+        if not drop_as_coverable_island:
+            keep.append(part)
 
-    minx, miny, maxx, maxy = rotated_poly.bounds
-    margin = (maxx - minx) + 1.0
-    all_segs: list = []
+    if not keep:
+        keep = [max(parts, key=lambda p: p.area)]
+    if len(keep) == 1:
+        return keep[0]
+    return MultiPolygon(keep)
 
-    y = miny + swath_width / 2.0
-    while y < maxy:
-        sweep_line = LineString([(minx - margin, y), (maxx + margin, y)])
-        for cell in cells:
-            cb = cell.poly.bounds
-            if not (cb[1] <= y <= cb[3]):
-                continue
-            try:
-                inter = cell.poly.intersection(sweep_line)
-            except Exception:
-                continue
-            for seg in _extract_linestring(inter):
-                if seg.length > 1e-9:
-                    all_segs.append(seg)
-        y += swath_width
 
-    if not all_segs:
+def _corridor_polygons(corridor: Polygon | MultiPolygon) -> list[Polygon]:
+    if corridor.is_empty:
         return []
+    if isinstance(corridor, MultiPolygon):
+        return [p for p in corridor.geoms if not p.is_empty and p.area > 0]
+    return [corridor]
 
-    order_flags = _order_swaths(all_segs, rot_start, exact=exact)
 
-    vis = VisibilityGraph(rotated_poly)
+def _corridor_greedy_path_rot(
+    corridor: Polygon | MultiPolygon,
+    swath_width: float,
+    rot_start: tuple[float, float],
+    exact: bool,
+) -> list[tuple[float, float]]:
+    parts = _corridor_polygons(corridor)
+    if not parts:
+        return []
+    ordered = (
+        _greedy_order_subpolygons(parts, rot_start)
+        if len(parts) > 1
+        else parts
+    )
     path_rot: list[tuple[float, float]] = []
+    _NAN = (float("nan"), float("nan"))
+    for part in ordered:
+        all_segs = _horizontal_swath_segments(part, swath_width)
+        if not all_segs:
+            continue
+        cursor = (
+            rot_start
+            if not path_rot
+            else (_last_real_xy(path_rot) or rot_start)
+        )
+        order_flags = _order_swaths(all_segs, cursor, exact=exact)
+        vis = VisibilityGraph(part)
+        if path_rot and not math.isnan(path_rot[-1][0]):
+            path_rot.append(_NAN)
+        _stitch_swath_segments(path_rot, all_segs, order_flags, vis)
+    return path_rot
 
-    for seg_idx, flipped in order_flags:
-        coords = list(all_segs[seg_idx].coords)
-        if flipped:
-            coords = list(reversed(coords))
-        if not path_rot:
-            path_rot.extend(coords)
-        else:
-            last = path_rot[-1]
-            near = coords[0]
-            if math.hypot(last[0] - near[0], last[1] - near[1]) > 1e-9:
-                transition = vis.shortest_path(last, near)
-                path_rot.extend(transition[1:])
-            path_rot.extend(coords[1:])
 
-    if not path_rot:
+def _fallback_midline_segments(cell_poly: Polygon) -> list:
+    if cell_poly.is_empty:
         return []
+    minx, miny, maxx, maxy = cell_poly.bounds
+    if maxy - miny < 1e-9 or maxx - minx < 1e-9:
+        return []
+    margin = (maxx - minx) + 1.0
+    mid_y = (miny + maxy) * 0.5
+    sweep = LineString([(minx - margin, mid_y), (maxx + margin, mid_y)])
+    try:
+        inter = cell_poly.intersection(sweep)
+    except Exception:
+        return []
+    return [seg for seg in _extract_linestring(inter) if seg.length > 1e-9]
 
-    cx_c, cy_c = centroid.x, centroid.y
+
+def _rotate_path_points(
+    pts: list[tuple[float, float]],
+    centroid: Point,
+    angle_deg: float,
+) -> list[tuple[float, float]]:
+    cx, cy = centroid.x, centroid.y
     cos_a = math.cos(math.radians(angle_deg))
     sin_a = math.sin(math.radians(angle_deg))
-    result: list[tuple[float, float]] = []
-    for px, py in path_rot:
+    out: list[tuple[float, float]] = []
+    for px, py in pts:
         if math.isnan(px):
-            result.append((px, py))
+            out.append((px, py))
             continue
-        dx, dy = px - cx_c, py - cy_c
-        result.append((cx_c + cos_a * dx - sin_a * dy, cy_c + sin_a * dx + cos_a * dy))
-    return result
+        dx, dy = px - cx, py - cy
+        out.append((cx + cos_a * dx - sin_a * dy, cy + sin_a * dx + cos_a * dy))
+    return out
 
 
-def _greedy_safe_path(
-    polygon: Polygon,
-    swath_width: float,
-    angle_rad: float,
-    start_position: tuple[float, float],
-    exact: bool = False,
-) -> list[tuple[float, float]]:
-    centroid = polygon.centroid
-    angle_deg = math.degrees(angle_rad)
-
-    rotated_poly = _shapely_rotate(
-        polygon, -angle_deg, origin=centroid, use_radians=False
-    )
-    rotated_poly = rotated_poly.buffer(-swath_width / 2.0)
-    if rotated_poly.is_empty:
-        return []
-    rot_start_pt = _shapely_rotate(
-        Point(start_position), -angle_deg, origin=centroid, use_radians=False
-    )
-    rot_start = (rot_start_pt.x, rot_start_pt.y)
-
-    min_x, min_y, max_x, max_y = rotated_poly.bounds
+def _horizontal_swath_segments(safe_poly: Polygon, swath_width: float) -> list:
+    min_x, min_y, max_x, max_y = safe_poly.bounds
     if max_y - min_y < 1e-9:
         return []
-
     margin = (max_x - min_x) + 1.0
+    eps = min(swath_width * 0.01, 1e-3 + swath_width * 1e-6)
+    ys: list[float] = []
+    y = min_y + eps
+    while y <= max_y - eps + 1e-9:
+        ys.append(y)
+        y += swath_width
+    top_y = max_y - eps
+    if not ys or ys[-1] + 1e-9 < top_y:
+        ys.append(top_y)
+
     all_segs: list = []
-    y = min_y + swath_width / 2.0
-    while y < max_y:
+    for y in ys:
         sweep_line = LineString([(min_x - margin, y), (max_x + margin, y)])
         try:
-            inter = rotated_poly.intersection(sweep_line)
+            inter = safe_poly.intersection(sweep_line)
         except Exception:
-            y += swath_width
             continue
         for seg in _extract_linestring(inter):
             if seg.length > 1e-9:
                 all_segs.append(seg)
-        y += swath_width
+    return all_segs
 
-    if not all_segs:
-        return []
 
-    order_flags = _order_swaths(all_segs, rot_start, exact=exact)
+def _last_real_xy(path: list[tuple[float, float]]) -> tuple[float, float] | None:
+    for p in reversed(path):
+        if not math.isnan(p[0]):
+            return (p[0], p[1])
+    return None
 
-    vis = VisibilityGraph(rotated_poly)
-    path_rot: list[tuple[float, float]] = []
 
+def _stitch_swath_segments(
+    path_rot: list[tuple[float, float]],
+    all_segs: list,
+    order_flags: list[tuple[int, bool]],
+    vis: VisibilityGraph,
+) -> None:
     for seg_idx, flipped in order_flags:
         coords = list(all_segs[seg_idx].coords)
         if flipped:
             coords = list(reversed(coords))
-
         near = coords[0]
-
         if not path_rot:
             path_rot.extend(coords)
         else:
@@ -354,42 +382,188 @@ def _greedy_safe_path(
                 path_rot.extend(transition[1:])
             path_rot.extend(coords[1:])
 
+
+def _cell_coverage_path(
+    cell_poly: Polygon,
+    swath_width: float,
+    start_position: tuple[float, float],
+    *,
+    exact: bool = False,
+) -> list[tuple[float, float]]:
+    if cell_poly.is_empty or cell_poly.area <= 1e-12:
+        return []
+
+    cell_angle = find_optimal_angle(cell_poly)
+    cell_angle_deg = math.degrees(cell_angle)
+    centroid = cell_poly.centroid
+    rotated_cell = _shapely_rotate(
+        cell_poly, -cell_angle_deg, origin=centroid, use_radians=False
+    )
+    rot_start_pt = _shapely_rotate(
+        Point(start_position), -cell_angle_deg, origin=centroid, use_radians=False
+    )
+    rot_start = (rot_start_pt.x, rot_start_pt.y)
+
+    all_segs = _horizontal_swath_segments(rotated_cell, swath_width)
+    if not all_segs:
+        all_segs = _fallback_midline_segments(rotated_cell)
+        if not all_segs:
+            return []
+
+    order_flags = _order_swaths(all_segs, rot_start, exact=exact)
+    vis = VisibilityGraph(rotated_cell)
+    path_rot: list[tuple[float, float]] = []
+    _stitch_swath_segments(path_rot, all_segs, order_flags, vis)
+    if not path_rot:
+        return []
+    return _rotate_path_points(path_rot, centroid, cell_angle_deg)
+
+
+def _rotated_to_world(
+    path_rot: list[tuple[float, float]],
+    centroid: Point,
+    angle_deg: float,
+) -> list[tuple[float, float]]:
+    return _rotate_path_points(path_rot, centroid, angle_deg)
+
+
+def _bcd_snake_path(
+    polygon: Polygon | MultiPolygon,
+    swath_width: float,
+    angle_rad: float,
+    start_position: tuple[float, float],
+    exact: bool = False,
+    bcd_coalesce_to: int | None = None,
+) -> list[tuple[float, float]]:
+    from .bcd import (
+        _traversal_order,
+        _two_opt_order,
+        bcd_slice_decompose,
+    )
+
+    centroid = polygon.centroid
+    angle_deg = math.degrees(angle_rad)
+
+    rotated_poly = _shapely_rotate(
+        polygon, -angle_deg, origin=centroid, use_radians=False
+    )
+    rot_start_pt = _shapely_rotate(
+        Point(start_position), -angle_deg, origin=centroid, use_radians=False
+    )
+    rot_start = (rot_start_pt.x, rot_start_pt.y)
+
+    corridor = _normalize_spray_corridor(
+        _spray_centerline_corridor(rotated_poly, swath_width),
+        swath_width,
+    )
+    if corridor.is_empty:
+        return []
+
+    cells = bcd_slice_decompose(
+        corridor,
+        swath=swath_width,
+        coalesce_to=bcd_coalesce_to,
+    )
+    if not cells:
+        path_rot = _corridor_greedy_path_rot(
+            corridor, swath_width, rot_start, exact=exact
+        )
+        return _rotated_to_world(path_rot, centroid, angle_deg)
+
+    visit_order = _two_opt_order(cells, _traversal_order(cells, rot_start))
+    vis = VisibilityGraph(corridor)
+    path_rot: list[tuple[float, float]] = []
+
+    for ci in visit_order:
+        cell_poly = cells[ci].poly
+        cursor = (
+            rot_start
+            if not path_rot
+            else (_last_real_xy(path_rot) or rot_start)
+        )
+        cell_path = _cell_coverage_path(
+            cell_poly,
+            swath_width,
+            cursor,
+            exact=exact,
+        )
+        if not cell_path:
+            continue
+        if not path_rot:
+            path_rot.extend(cell_path)
+            continue
+        last = _last_real_xy(path_rot)
+        first = cell_path[0]
+        if last is not None and math.hypot(last[0] - first[0], last[1] - first[1]) > 1e-9:
+            transition = vis.shortest_path(last, first)
+            path_rot.extend(transition[1:])
+        path_rot.extend(cell_path[1:])
+
     if not path_rot:
         return []
 
-    cx, cy = centroid.x, centroid.y
-    cos_a = math.cos(math.radians(angle_deg))
-    sin_a = math.sin(math.radians(angle_deg))
-    result: list[tuple[float, float]] = []
-    for px, py in path_rot:
-        if math.isnan(px):
-            result.append((px, py))
-            continue
-        dx, dy = px - cx, py - cy
-        result.append((cx + cos_a * dx - sin_a * dy, cy + sin_a * dx + cos_a * dy))
-    return result
+    return _rotated_to_world(path_rot, centroid, angle_deg)
+
+
+def _greedy_safe_path(
+    polygon: Polygon | MultiPolygon,
+    swath_width: float,
+    angle_rad: float,
+    start_position: tuple[float, float],
+    exact: bool = False,
+) -> list[tuple[float, float]]:
+    centroid = polygon.centroid
+    angle_deg = math.degrees(angle_rad)
+
+    rotated_poly = _shapely_rotate(
+        polygon, -angle_deg, origin=centroid, use_radians=False
+    )
+    if rotated_poly.is_empty:
+        return []
+    rot_start_pt = _shapely_rotate(
+        Point(start_position), -angle_deg, origin=centroid, use_radians=False
+    )
+    rot_start = (rot_start_pt.x, rot_start_pt.y)
+
+    corridor = _normalize_spray_corridor(
+        _spray_centerline_corridor(rotated_poly, swath_width),
+        swath_width,
+    )
+    path_rot = _corridor_greedy_path_rot(
+        corridor, swath_width, rot_start, exact=exact
+    )
+    if not path_rot:
+        return []
+
+    return _rotated_to_world(path_rot, centroid, angle_deg)
 
 
 def build_zone_snake(
-    zone_polygon: Polygon,
+    zone_polygon: Polygon | MultiPolygon,
     swath_width: float,
     angle_rad: float = None,
     start_position=None,
     strategy: str = "greedy_safe",
     exact: bool = False,
+    bcd_coalesce_to: int | None = None,
 ) -> tuple[list[tuple[float, float]], float, int]:
     if zone_polygon.is_empty:
         return [], 0.0, 0
 
     if angle_rad is None:
-        angle_rad = find_optimal_angle(zone_polygon)
+        angle_rad = find_optimal_angle(_polygon_for_optimal_angle(zone_polygon))
 
     if start_position is None:
         start_position = (zone_polygon.centroid.x, zone_polygon.centroid.y)
 
     if strategy == "bcd":
         path = _bcd_snake_path(
-            zone_polygon, swath_width, angle_rad, start_position, exact=exact
+            zone_polygon,
+            swath_width,
+            angle_rad,
+            start_position,
+            exact=exact,
+            bcd_coalesce_to=bcd_coalesce_to,
         )
     else:
         path = _greedy_safe_path(

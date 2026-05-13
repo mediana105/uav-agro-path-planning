@@ -6,6 +6,7 @@ from typing import List, Optional, Tuple
 from shapely.affinity import rotate
 from shapely.geometry import (
     LineString,
+    MultiPolygon,
     Point,
     Polygon as ShapelyPolygon,
 )
@@ -227,29 +228,60 @@ def path_length(path: List[Tuple[float, float]]) -> float:
 
 
 def decompose_field(
-    polygon: ShapelyPolygon,
+    polygon: ShapelyPolygon | MultiPolygon,
     swath: float,
     angle: float = 0.0,  # degrees
-) -> Tuple[object, List, ShapelyPolygon]:
-    from .bcd import bcd_slice_decompose, Cell as BcdCell
+    coalesce_to: int | None = None,
+) -> Tuple[object, List, ShapelyPolygon | MultiPolygon]:
+    from .bcd import (
+        Cell as BcdCell,
+        _bcd_trace,
+        bcd_slice_decompose,
+        bcd_trace_enabled,
+    )
+    from .coverage_path import _spray_centerline_corridor
 
-    if polygon.is_empty:
+    if polygon.is_empty or swath <= 0:
         return None, [], polygon
 
     centroid = polygon.centroid
     rotated = rotate(polygon, -angle, origin=centroid, use_radians=False)
-    raw_cells = bcd_slice_decompose(rotated, swath)
+    corridor = _spray_centerline_corridor(rotated, swath)
+    if corridor.is_empty:
+        return None, [], polygon
+
+    raw_cells = bcd_slice_decompose(
+        corridor, swath=swath, coalesce_to=coalesce_to
+    )
+
+    if bcd_trace_enabled():
+        _bcd_trace(
+            "decompose_field: zone area=%.4f angle=%.4f° swath=%.4f corridor=%s "
+            "area=%.4f → raw_cells=%d coalesce_to=%s",
+            polygon.area,
+            angle,
+            swath,
+            corridor.geom_type,
+            getattr(corridor, "area", 0.0) or 0.0,
+            len(raw_cells),
+            coalesce_to,
+        )
 
     result_cells = []
-    for cell in raw_cells:
+    idx_map = {cell.idx: i for i, cell in enumerate(raw_cells)}
+    for i, cell in enumerate(raw_cells):
         poly_back = rotate(cell.poly, angle, origin=centroid, use_radians=False)
         result_cells.append(
             BcdCell(
-                idx=cell.idx,
+                idx=i,
                 poly=poly_back,
                 x_min=poly_back.bounds[0],
                 x_max=poly_back.bounds[2],
-                neighbours=cell.neighbours,
+                neighbours={
+                    idx_map[nb]
+                    for nb in cell.neighbours
+                    if nb in idx_map and idx_map[nb] != i
+                },
             )
         )
 

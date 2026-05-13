@@ -4,11 +4,13 @@ from shapely.geometry import Polygon, box
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import unary_union
 
+from ..angle_finders.altitude_optimizer import find_optimal_angle
 from ..decomposition.darp import DARP
 from ..decomposition.field_decomposition import FieldDecomposition
-from ..path_planning.coverage_path import build_zone_snake, count_turns
 from ..path_planning.boustrophedon import apply_resource_limits, path_length
-from . import DroneConfig, MissionResult, ZoneResult
+from ..path_planning.coverage_path import build_zone_snake, count_turns
+from .drone_config import DroneConfig
+from .mission_result import MissionResult, ZoneResult
 
 
 def interior_polygon(interior) -> Polygon:
@@ -165,15 +167,31 @@ class MissionOptimizer:
                 )
                 continue
 
-            path, optimal_angle, _ = build_zone_snake(
-                zone_polygon,
-                drone.swath_width,
-                angle_rad=None,
-                start_position=drone.start_position,
-                strategy=self.strategy,
-                exact=exact,
-                bcd_coalesce_to=drone.bcd_coalesce_to,
-            )
+            if zone_polygon.geom_type == "MultiPolygon":
+                sub_polygons = list(zone_polygon.geoms)
+            else:
+                sub_polygons = [zone_polygon]
+
+            largest = max(sub_polygons, key=lambda g: g.area)
+            optimal_angle = find_optimal_angle(largest)
+
+            path = []
+            current_start = drone.start_position
+            for sub_poly in sub_polygons:
+                sub_path, ang, _ = build_zone_snake(
+                    sub_poly,
+                    drone.swath_width,
+                    angle_rad=optimal_angle,
+                    start_position=current_start,
+                    strategy=self.strategy,
+                    exact=exact,
+                )
+                if not sub_path:
+                    continue
+                path.extend(sub_path[1:] if path else sub_path)
+                real_pts = [p for p in sub_path if not math.isnan(p[0])]
+                if real_pts:
+                    current_start = real_pts[-1]
 
             path, rth_count = apply_resource_limits(
                 path,

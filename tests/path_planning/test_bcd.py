@@ -33,6 +33,30 @@ def cells_cover(cells: list[Cell], polygon: Polygon, tol: float = 1e-6) -> bool:
 
 
 
+class TestBcdMultiPolygon:
+    def test_all_parts_decomposed_not_only_largest(self):
+        from shapely.geometry import MultiPolygon, box
+
+        a = box(0, 0, 3, 8)
+        b = box(10, 0, 13, 8)
+        mp = MultiPolygon([a, b])
+        cells = bcd_slice_decompose(mp, swath=1.0)
+        assert len(cells) >= 2
+        assert sum(c.poly.area for c in cells) == pytest.approx(mp.area, rel=1e-3)
+
+    def test_neighbours_symmetric_after_concat(self):
+        from shapely.geometry import MultiPolygon, box
+
+        a = box(0, 0, 4, 2)
+        b = box(0, 3, 4, 5)
+        mp = MultiPolygon([a, b])
+        cells = bcd_slice_decompose(mp, swath=0.5)
+        by_idx = {c.idx: c for c in cells}
+        for c in cells:
+            for nb in c.neighbours:
+                assert c.idx in by_idx[nb].neighbours
+
+
 class TestBcdCriticalXValues:
     def test_empty_polygon(self):
         assert bcd_critical_x_values(Polygon()) == []
@@ -63,11 +87,12 @@ class TestBcdCriticalXValues:
         assert any(abs(x - 3.0) < 1e-6 for x in xs)
         assert any(abs(x - 7.0) < 1e-6 for x in xs)
 
-    def test_l_shape_vertex_x_included(self):
-        # L-shape: concavity at x=5
+    def test_l_shape_is_y_monotone_under_x_sweep(self):
         poly = Polygon([(0, 0), (10, 0), (10, 5), (5, 5), (5, 10), (0, 10)])
         xs = bcd_critical_x_values(poly)
-        assert any(abs(x - 5.0) < 1e-6 for x in xs)
+        assert xs[0] == pytest.approx(0.0)
+        assert xs[-1] == pytest.approx(10.0)
+        assert not any(abs(x - 5.0) < 1e-6 for x in xs)
 
 
 class TestBcdSliceDecompose:
@@ -190,11 +215,9 @@ class TestBcdWithHoles:
         cells = bcd_slice_decompose(poly, swath=1.0)
         assert total_area(cells) == pytest.approx(poly.area, rel=1e-3)
 
-    def test_donut_more_than_one_cell(self):
-        # Hole forces exactly 2 cells: left strip (x=0..4) and right strip (x=8..12).
-        # The middle strips (x=4..8) contain the hole and cannot be merged with neighbours.
+    def test_donut_four_cells_around_hole(self):
         cells = bcd_slice_decompose(self._donut(), swath=1.0)
-        assert len(cells) == 2
+        assert len(cells) == 4
 
     def test_donut_cells_valid(self):
         cells = bcd_slice_decompose(self._donut(), swath=1.0)
