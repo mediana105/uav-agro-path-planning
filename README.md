@@ -113,7 +113,7 @@ python -m src.main [field_name] [options]
 | `--speed` | Playback speed factor for simulation | `10.0` |
 | `--show` | Show interactive plot window | `false` |
 
-\
+
 ### Output
 
 The system generates the following outputs in the `out/<field>/` directory:
