@@ -1,0 +1,82 @@
+from typing import Any
+
+from ..pipeline.mission_result import MissionResult
+from .optimization_algorithms import SimulatedAnnealingOptimizer, TabuSearchOptimizer
+
+
+class JointOptimizer:
+    def __init__(self, mission_optimizer):
+        self.mission_optimizer = mission_optimizer
+        self.n_drones = mission_optimizer.num_drones
+        self._last_result: MissionResult | None = None
+        self._last_portions: list[float] | None = None
+        self._cache: dict[tuple[float, ...], float] = {}
+
+    def objective(self, portions: list[float]) -> float:
+        key = tuple(round(p, 6) for p in portions)
+        if key in self._cache:
+            return self._cache[key]
+        result = self.mission_optimizer.evaluate(portions)
+        self._last_result = result
+        self._last_portions = portions
+        value = result.mission_time
+        self._cache[key] = value
+        return value
+
+    def optimize(
+        self,
+        initial_portions: list[float] = None,
+        algorithm: str = "sa",
+        initial_temp: float = 1000.0,
+        final_temp: float = 1e-10,
+        step_size: float = 0.1,
+        tabu_tenure: int = 15,
+        num_neighbors: int = 5,
+        tabu_step_size: float = 0.05,
+        tabu_epsilon: float = 1e-3,
+        max_iterations: int = 1000,
+        seed: int | None = None,
+        iteration_callback: Any | None = None,
+        final_exact: bool = False,
+    ) -> dict[str, Any]:
+        if algorithm == "tabu":
+            optimizer = TabuSearchOptimizer(
+                tabu_tenure=tabu_tenure,
+                num_neighbors=num_neighbors,
+                step_size=tabu_step_size,
+                tabu_epsilon=tabu_epsilon,
+                random_seed=seed if seed is not None else 1,
+            )
+        else:
+            optimizer = SimulatedAnnealingOptimizer(
+                initial_temp=initial_temp,
+                final_temp=final_temp,
+                step_size=step_size,
+                random_seed=seed,
+            )
+
+        opt_result = optimizer.optimize(
+            objective_function=self.objective,
+            initial_portions=initial_portions,
+            max_iterations=max_iterations,
+            iteration_callback=iteration_callback,
+        )
+
+        self._last_portions = opt_result["optimized_portions"]
+        self._last_result = self.mission_optimizer.evaluate(
+            self._last_portions, exact=final_exact
+        )
+
+        return {
+            "optimized_portions": opt_result["optimized_portions"],
+            "best_time": opt_result["best_value"],
+            "iterations": opt_result["iterations"],
+            "final_temperature": opt_result["final_temperature"],
+            "final_mission_result": self._last_result,
+        }
+
+    def get_last_portions(self) -> list[float] | None:
+        return self._last_portions
+
+    def get_last_mission_result(self) -> MissionResult | None:
+        return self._last_result
