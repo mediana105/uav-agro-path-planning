@@ -7,7 +7,9 @@ from typing import Any
 import numpy as np
 
 
-def _generate_neighbor(portions: list[float], step_size: float, rng: random.Random) -> list[float]:
+def _generate_neighbor(
+    portions: list[float], step_size: float, rng: random.Random
+) -> list[float]:
     neighbor = np.array(portions, dtype=float)
     n = len(neighbor)
 
@@ -32,23 +34,26 @@ def _generate_neighbor(portions: list[float], step_size: float, rng: random.Rand
 
 
 class SimulatedAnnealingOptimizer:
-
-    def __init__(self,
-                 initial_temp: float = 1000.0,
-                 final_temp: float = 1e-10,
-                 step_size: float = 0.1,
-                 random_seed: int = 1):
+    def __init__(
+        self,
+        initial_temp: float = 1000.0,
+        final_temp: float = 1e-10,
+        step_size: float = 0.1,
+        random_seed: int = 1,
+    ):
 
         self.initial_temp = initial_temp
         self.final_temp = final_temp
         self.step_size = step_size
         self.random = random.Random(random_seed)
 
-    def optimize(self,
-                 objective_function: Callable[[list[float]], float],
-                 initial_portions: list[float],
-                 max_iterations: int = 1000,
-                 iteration_callback: Callable = None) -> dict[str, Any]:
+    def optimize(
+        self,
+        objective_function: Callable[[list[float]], float],
+        initial_portions: list[float],
+        max_iterations: int = 1000,
+        iteration_callback: Callable = None,
+    ) -> dict[str, Any]:
         current_portions = initial_portions.copy()
         current_value = objective_function(current_portions)
 
@@ -77,18 +82,23 @@ class SimulatedAnnealingOptimizer:
 
             if iteration_callback is not None:
                 iteration_callback(
-                    iteration, current_portions, current_value,
-                    best_portions, best_value, temperature, accepted,
+                    iteration,
+                    current_portions,
+                    current_value,
+                    best_portions,
+                    best_value,
+                    temperature,
+                    accepted,
                 )
 
             temperature *= cooling_rate
             iteration += 1
 
         return {
-            'optimized_portions': best_portions,
-            'best_value': best_value,
-            'iterations': iteration,
-            'final_temperature': temperature
+            "optimized_portions": best_portions,
+            "best_value": best_value,
+            "iterations": iteration,
+            "final_temperature": temperature,
         }
 
     def _generate_neighbor(self, portions: list[float]) -> list[float]:
@@ -96,23 +106,27 @@ class SimulatedAnnealingOptimizer:
 
 
 class TabuSearchOptimizer:
-    def __init__(self,
-                 tabu_tenure: int = 15,
-                 num_neighbors: int = 5,
-                 step_size: float = 0.05,
-                 tabu_epsilon: float = 1e-3,
-                 random_seed: int = 1):
+    def __init__(
+        self,
+        tabu_tenure: int = 15,
+        num_neighbors: int = 5,
+        step_size: float = 0.05,
+        tabu_epsilon: float = 1e-3,
+        random_seed: int = 1,
+    ):
         self.tabu_tenure = tabu_tenure
         self.num_neighbors = num_neighbors
         self.step_size = step_size
         self.tabu_epsilon = tabu_epsilon
         self.random = random.Random(random_seed)
 
-    def optimize(self,
-                 objective_function: Callable[[list[float]], float],
-                 initial_portions: list[float],
-                 max_iterations: int = 200,
-                 iteration_callback: Callable = None) -> dict[str, Any]:
+    def optimize(
+        self,
+        objective_function: Callable[[list[float]], float],
+        initial_portions: list[float],
+        max_iterations: int = 200,
+        iteration_callback: Callable = None,
+    ) -> dict[str, Any]:
         current_portions = initial_portions.copy()
         current_value = objective_function(current_portions)
 
@@ -128,7 +142,6 @@ class TabuSearchOptimizer:
                 for _ in range(self.num_neighbors)
             ]
 
-            # Evaluate all candidates; build (value, portions) sorted list
             evaluated = sorted(
                 ((objective_function(c), c) for c in candidates),
                 key=lambda x: x[0],
@@ -143,13 +156,11 @@ class TabuSearchOptimizer:
                     accepted = True
                     break
                 if value < best_value:
-                    # Aspiration: accept tabu solution if it beats global best
                     chosen_value, chosen_portions = value, candidate
                     accepted = True
                     break
 
             if chosen_portions is None:
-                # All candidates are tabu and none beats best — take the best anyway
                 chosen_value, chosen_portions = evaluated[0]
                 accepted = True
 
@@ -163,15 +174,20 @@ class TabuSearchOptimizer:
 
             if iteration_callback is not None:
                 iteration_callback(
-                    iteration, current_portions, current_value,
-                    best_portions, best_value, 0.0, accepted,
+                    iteration,
+                    current_portions,
+                    current_value,
+                    best_portions,
+                    best_value,
+                    0.0,
+                    accepted,
                 )
 
         return {
-            'optimized_portions': best_portions,
-            'best_value': best_value,
-            'iterations': max_iterations,
-            'final_temperature': 0.0,
+            "optimized_portions": best_portions,
+            "best_value": best_value,
+            "iterations": max_iterations,
+            "final_temperature": 0.0,
         }
 
     def _generate_neighbor(self, portions: list[float]) -> list[float]:
@@ -180,6 +196,5 @@ class TabuSearchOptimizer:
     def _is_tabu(self, candidate: list[float], tabu_list: deque) -> bool:
         c = np.array(candidate)
         return any(
-            np.max(np.abs(c - np.array(t))) < self.tabu_epsilon
-            for t in tabu_list
+            np.max(np.abs(c - np.array(t))) < self.tabu_epsilon for t in tabu_list
         )

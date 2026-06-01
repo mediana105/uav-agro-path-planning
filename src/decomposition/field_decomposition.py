@@ -1,7 +1,8 @@
 import math
 
 import numpy as np
-from shapely import Point, Polygon
+from shapely import Polygon
+from shapely.geometry import box
 
 
 class FieldDecomposition:
@@ -29,10 +30,15 @@ class FieldDecomposition:
             for c in range(self.grid_cols):
                 cx = min_x + (c + 0.5) * self.cell_size
                 cy = min_y + (r + 0.5) * self.cell_size
-                point = Point(cx, cy)
+                cell_box = box(
+                    min_x + c * self.cell_size,
+                    min_y + r * self.cell_size,
+                    min_x + (c + 1) * self.cell_size,
+                    min_y + (r + 1) * self.cell_size,
+                )
 
-                if field_polygon.contains(point) and all(
-                    not h.contains(point) for h in holes
+                if field_polygon.intersects(cell_box) and all(
+                    not h.intersects(cell_box) for h in holes
                 ):
                     self.field_map[r, c] = True
                 else:

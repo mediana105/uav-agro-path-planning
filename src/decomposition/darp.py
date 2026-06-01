@@ -206,9 +206,7 @@ class DARP:
 
     def update_portions(self, portions, reset_state: bool = True) -> None:
         if len(portions) != self.droneNo:
-            raise ValueError(
-                f"Expected {self.droneNo} portions, got {len(portions)}"
-            )
+            raise ValueError(f"Expected {self.droneNo} portions, got {len(portions)}")
         s = sum(portions)
         if abs(s - 1) >= 1e-4:
             raise ValueError(f"Sum of portions must equal 1 (got {s})")
@@ -450,7 +448,6 @@ class DARP:
                         TilesImportance[r, x, y] = 1 / (tempSum - AllDistances[r, x, y])
                     else:
                         TilesImportance[r, x, y] = 1
-                    # Todo FixMe!
                     if TilesImportance[r, x, y] > MaximumImportance[r]:
                         MaximumImportance[r] = TilesImportance[r, x, y]
 
@@ -502,7 +499,7 @@ class DARP:
 
         # Normalization
         if MaxV - MinV == 0:
-            return distRobot  # чтобы не делить на 0
+            return distRobot
         if RobotR:
             distRobot = (distRobot - MinV) * (1.0 / (MaxV - MinV)) + 1.0
         else:

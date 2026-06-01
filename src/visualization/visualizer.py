@@ -6,13 +6,13 @@ import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 from matplotlib.animation import FuncAnimation
 from matplotlib.figure import Figure
-from shapely.geometry import MultiPolygon, Polygon
+from shapely.geometry import Polygon
 from shapely.geometry import Polygon as ShapelyPolygon
 
 from ..optimization.joint_optimizer import JointOptimizer
-from ..path_planning.boustrophedon import decompose_field
+from ..path_planning.bcd import decompose_field
 from ..pipeline import DroneConfig, MissionResult
-from ..pipeline.pipeline import MissionOptimizer, calculate_portions_rth_aware
+from ..pipeline.pipeline import MissionPlanner, calculate_portions_rth_aware
 
 _DRONE_COLORS = [
     "#2196F3",  # blue
@@ -41,83 +41,6 @@ def _is_nan_point(pt) -> bool:
     return False
 
 
-def _draw_pass_arrows(
-    ax: plt.Axes, path: list, optimal_angle: float, color: str
-) -> None:
-    pass_dir = math.pi / 2 + optimal_angle
-    for i in range(len(path) - 1):
-        x1, y1 = path[i]
-        x2, y2 = path[i + 1]
-        if _is_nan_point((x1, y1)) or _is_nan_point((x2, y2)):
-            continue
-        seg_angle = math.atan2(y2 - y1, x2 - x1)
-        diff = abs((seg_angle - pass_dir) % math.pi)
-        diff = min(diff, math.pi - diff)
-        if diff > math.pi / 4:
-            continue
-        mx, my = (x1 + x2) / 2, (y1 + y2) / 2
-        length = math.hypot(x2 - x1, y2 - y1)
-        if length < 1e-9:
-            continue
-        eps = length * 0.15
-        dx = (x2 - x1) / length * eps
-        dy = (y2 - y1) / length * eps
-        ax.annotate(
-            "",
-            xy=(mx + dx, my + dy),
-            xytext=(mx - dx, my - dy),
-            arrowprops={
-                "arrowstyle": "-|>",
-                "color": color,
-                "lw": 1.2,
-                "mutation_scale": 12,
-            },
-            zorder=4,
-        )
-
-
-def _zone_polygon_parts(zone_polygon: Polygon | MultiPolygon) -> list[Polygon]:
-    if zone_polygon.is_empty:
-        return []
-    gt = zone_polygon.geom_type
-    if gt == "Polygon":
-        return [zone_polygon]
-    if gt == "MultiPolygon":
-        return list(zone_polygon.geoms)
-    if gt == "GeometryCollection":
-        return [g for g in zone_polygon.geoms if isinstance(g, Polygon)]
-    return []
-
-
-def _rth_legs(path: list, start_pos: tuple, eps: float = 1e-3):
-    legs = []
-    sx, sy = start_pos
-    n = len(path)
-    i = 0
-    while i < n - 3:
-        p0, p1, p2, p3 = path[i], path[i + 1], path[i + 2], path[i + 3]
-        if any(isinstance(p, tuple) and len(p) == 3 for p in (p0, p1, p2, p3)):
-            i += 1
-            continue
-        if (
-            _is_nan_point(p0)
-            and not _is_nan_point(p1)
-            and math.hypot(p1[0] - sx, p1[1] - sy) <= eps
-            and _is_nan_point(p2)
-            and not _is_nan_point(p3)
-        ):
-            depart = next(
-                (path[k] for k in range(i - 1, -1, -1) if not _is_nan_point(path[k])),
-                None,
-            )
-            if depart is not None:
-                legs.append((depart, p1, p3))
-            i += 3
-            continue
-        i += 1
-    return legs
-
-
 def _coverage_segments_and_rth_legs(path: list, start_pos: tuple, eps: float = 1e-3):
     coverage_segments: list[list[tuple[float, float]]] = []
     rth_legs = []
@@ -134,13 +57,21 @@ def _coverage_segments_and_rth_legs(path: list, start_pos: tuple, eps: float = 1
             and _is_nan_point(path[i + 2])
             and not _is_nan_point(path[i + 3])
         ):
-            depart = current[-1] if current else None
+            depart = None
+            if current:
+                depart = current[-1]
+            elif coverage_segments:
+                depart = coverage_segments[-1][-1]
+
             home = path[i + 1]
             resume = path[i + 3]
+
             if len(current) >= 2:
                 coverage_segments.append(current)
+
             if depart is not None:
                 rth_legs.append((depart, home, resume))
+
             current = [resume]
             i += 4
             continue
@@ -175,8 +106,8 @@ def _draw_field_base(ax: plt.Axes, field_polygon: Polygon) -> None:
     ax.plot(fx, fy, color=_FIELD_EDGE, linewidth=2.2, zorder=1)
     for interior in field_polygon.interiors:
         hx, hy = interior.xy
-        ax.fill(hx, hy, color="white", zorder=2)
-        ax.plot(hx, hy, color=_HOLE_EDGE, linewidth=1.5, linestyle=_RTH_DASH, zorder=3)
+        ax.fill(hx, hy, color="white", zorder=4)
+        ax.plot(hx, hy, color=_HOLE_EDGE, linewidth=1.5, linestyle=_RTH_DASH, zorder=5)
 
 
 def _draw_swath_ribbon(
@@ -192,16 +123,16 @@ def _draw_swath_ribbon(
         return
     xs = [p[0] for p in segment]
     ys = [p[1] for p in segment]
-    ribbon_lw = max(6.0, min(18.0, swath_width * 1.8))
+    ribbon_lw = max(3.0, min(10.0, swath_width * 1.0))
     ax.plot(
         xs,
         ys,
         "-",
         color=color,
         linewidth=ribbon_lw,
-        alpha=0.10 * alpha_scale,
-        solid_capstyle="round",
-        solid_joinstyle="round",
+        alpha=0.08 * alpha_scale,
+        solid_capstyle="butt",
+        solid_joinstyle="miter",
         zorder=zorder,
     )
 
@@ -213,30 +144,36 @@ def _draw_segment_arrows(
     *,
     zorder: float,
 ) -> None:
-    if len(segment) < 3:
+    if len(segment) < 2:
         return
-    step = max(3, len(segment) // 4)
-    for i in range(step - 1, len(segment) - 1, step):
-        x1, y1 = segment[i]
-        x2, y2 = segment[i + 1]
-        length = math.hypot(x2 - x1, y2 - y1)
-        if length < 4.0:
-            continue
-        trim = min(length * 0.22, 4.0)
-        ux, uy = (x2 - x1) / length, (y2 - y1) / length
-        ax.annotate(
-            "",
-            xy=(x2 - ux * trim * 0.15, y2 - uy * trim * 0.15),
-            xytext=(x2 - ux * trim, y2 - uy * trim),
-            arrowprops={
-                "arrowstyle": "-|>",
-                "color": color,
-                "lw": 1.2,
-                "mutation_scale": 10,
-                "alpha": 0.95,
-            },
-            zorder=zorder,
-        )
+    mid_idx = (len(segment) - 1) // 2
+
+    x1, y1 = segment[mid_idx]
+    x2, y2 = segment[mid_idx + 1]
+
+    length = math.hypot(x2 - x1, y2 - y1)
+
+    if length < 1e-9:
+        return
+
+    ux, uy = (x2 - x1) / length, (y2 - y1) / length
+    mx, my = (x1 + x2) / 2, (y1 + y2) / 2
+
+    arrow_len = min(length * 0.22, 4.0)
+
+    ax.annotate(
+        "",
+        xy=(mx + ux * arrow_len * 0.5, my + uy * arrow_len * 0.5),
+        xytext=(mx - ux * arrow_len * 0.5, my - uy * arrow_len * 0.5),
+        arrowprops={
+            "arrowstyle": "-|>",
+            "color": color,
+            "lw": 1.2,
+            "mutation_scale": 10,
+            "alpha": 0.95,
+        },
+        zorder=zorder,
+    )
 
 
 def _auto_fig_size(
@@ -263,16 +200,14 @@ class MissionVisualizer:
         field_polygon: Polygon,
         drones: list[DroneConfig],
         cell_size: float = 1.0,
-        strategy: str = "greedy_safe",
     ) -> None:
         self.field_polygon = field_polygon
         self.drones = drones
         self.cell_size = cell_size
-        self._optimizer = MissionOptimizer(
+        self._optimizer = MissionPlanner(
             field_polygon,
             drones,
             cell_size,
-            strategy=strategy,
         )
 
     def visualize(
@@ -304,11 +239,12 @@ class MissionVisualizer:
             "UAV Agricultural Mission Planning", fontsize=15, fontweight="bold"
         )
 
+        init_time = initial_result.mission_time
         self.draw_panel(
             ax_init,
             initial_result,
             initial_portions,
-            title="Initial Decomposition\n(productivity‑based portions)",
+            title=f"Initial Decomposition\nt = {init_time:.1f} s",
         )
 
         joint = JointOptimizer(self._optimizer)
@@ -321,11 +257,12 @@ class MissionVisualizer:
         opt_portions = meta["optimized_portions"]
         opt_result = meta["final_mission_result"]
 
+        opt_time = opt_result.mission_time
         self.draw_panel(
             ax_opt,
             opt_result,
             opt_portions,
-            title=f"{algo_label}‑Optimized Decomposition\n({meta['iterations']} iterations)",
+            title=f"{algo_label}‑Optimized Decomposition\nt = {opt_time:.1f} s",
         )
 
         if save_path:
@@ -362,7 +299,9 @@ class MissionVisualizer:
                 for sub in sub_polys:
                     zx, zy = sub.exterior.xy
                     ax.fill(zx, zy, alpha=0.18, color=color, zorder=1.5)
-                    ax.plot(zx, zy, "-", color=color, linewidth=1.1, alpha=0.9, zorder=2)
+                    ax.plot(
+                        zx, zy, "-", color=color, linewidth=1.1, alpha=0.9, zorder=2
+                    )
                     for interior in sub.interiors:
                         ix, iy = interior.xy
                         ax.fill(ix, iy, alpha=1.0, color="white")
@@ -389,8 +328,8 @@ class MissionVisualizer:
                         color=color,
                         linewidth=1.4,
                         alpha=0.92,
-                        solid_capstyle="round",
-                        solid_joinstyle="round",
+                        solid_capstyle="butt",
+                        solid_joinstyle="miter",
                         zorder=4,
                     )
                     _draw_segment_arrows(ax, seg, color, zorder=4.4)
@@ -461,35 +400,19 @@ class MissionVisualizer:
                 markeredgewidth=2.2,
                 zorder=6,
             )
-            ax.text(
-                sx,
-                sy - 6,
-                f"CS{drone.id}",
-                ha="center",
-                va="top",
-                fontsize=7,
-                color=color,
-                fontweight="bold",
-                zorder=6,
-            )
-
-            rth_label = (
-                f"  |  RTH: {zone_result.rth_count}x" if zone_result.rth_count else ""
-            )
-            label = f"Drone {drone.id}  ({portions[i]:.1%})  t = {zone_result.total_time:.1f} s{rth_label}"
+            label = f"Drone {drone.id}  ({portions[i]:.1%})"
             legend_handles.append(mpatches.Patch(color=color, label=label))
 
-        ax.set_title(f"{title}\nMission time: {result.mission_time:.1f} s", fontsize=10)
+        ax.set_title(title, fontsize=12)
         ax.set_xlabel("X (m)")
         ax.set_ylabel("Y (m)")
         ax.set_aspect("equal", adjustable="box")
 
-        # Легенда снизу, ещё ниже, чтобы не перекрывать подписи осей и сетку
         ax.legend(
             handles=legend_handles,
             loc="upper center",
-            bbox_to_anchor=(0.5, -0.3),
-            fontsize=8,
+            bbox_to_anchor=(0.5, -0.08),
+            fontsize=10,
             ncol=2,
             frameon=True,
             fancybox=True,
@@ -504,7 +427,12 @@ class MissionVisualizer:
             va="bottom",
             fontsize=7.5,
             color="#444444",
-            bbox={"boxstyle": "round,pad=0.25", "facecolor": "#fffdf8", "alpha": 0.9, "edgecolor": "none"},
+            bbox={
+                "boxstyle": "round,pad=0.25",
+                "facecolor": "#fffdf8",
+                "alpha": 0.9,
+                "edgecolor": "none",
+            },
         )
         ax.margins(x=0.03, y=0.08)
 
@@ -531,7 +459,6 @@ class MissionVisualizer:
                 zone_result.zone_polygon,
                 swath,
                 angle_deg,
-                coalesce_to=drone.bcd_coalesce_to,
             )
             total_cells += len(cells)
             for ci, cell in enumerate(cells):
@@ -604,7 +531,6 @@ class MissionVisualizer:
                 zone_result.zone_polygon,
                 drone.swath_width,
                 math.degrees(zone_result.optimal_angle),
-                coalesce_to=drone.bcd_coalesce_to,
             )
 
             total_cells += len(cells)
@@ -697,8 +623,15 @@ class MissionVisualizer:
                 ax.fill(zx, zy, alpha=0.11, color=color, zorder=1.5)
                 for interior in zone_result.zone_polygon.interiors:
                     ix, iy = interior.xy
-                    ax.fill(ix, iy, color="white", zorder=2)
-                    ax.plot(ix, iy, color=_HOLE_EDGE, linestyle=_RTH_DASH, linewidth=1.0, zorder=3)
+                    ax.fill(ix, iy, color="white", zorder=4)
+                    ax.plot(
+                        ix,
+                        iy,
+                        color=_HOLE_EDGE,
+                        linestyle=_RTH_DASH,
+                        linewidth=1.0,
+                        zorder=5,
+                    )
 
             if zone_result.path:
                 coverage_segments, rth_legs = _coverage_segments_and_rth_legs(
@@ -797,42 +730,28 @@ class MissionVisualizer:
             pi = 0
             while pi < n_pts:
                 pt = path_pts[pi]
-                # пропускаем трёхэлементные маркеры
                 if isinstance(pt, tuple) and len(pt) == 3:
                     pi += 1
                     continue
                 x, y = pt
                 if math.isnan(x):
-                    if (
-                        pi + 3 < n_pts
-                        and not _is_nan_point(path_pts[pi + 1])
-                        and math.hypot(
-                            path_pts[pi + 1][0] - sx, path_pts[pi + 1][1] - sy
-                        )
-                        < 1e-3
-                        and _is_nan_point(path_pts[pi + 2])
-                        and not _is_nan_point(path_pts[pi + 3])
-                    ):
-                        hx, hy = path_pts[pi + 1]
-                        rx, ry = path_pts[pi + 3]
-                        t += math.hypot(hx - prev[0], hy - prev[1]) / speed
-                        keyframes.append((t, hx, hy, True))
-                        t += _REFUEL_PAUSE
-                        keyframes.append((t, hx, hy, True))
-                        t += math.hypot(rx - hx, ry - hy) / speed
-                        keyframes.append((t, rx, ry, False))
-                        prev = (rx, ry)
-                        pi += 4
-                        continue
-                    else:
-                        t += drone.turn_time
-                        px, py = prev
-                        keyframes.append((t, px, py, False))
+                    pi += 1
+                    continue
+                dist = math.hypot(x - prev[0], y - prev[1])
+                t += dist / speed
+                at_home = abs(x - sx) < 1e-6 and abs(y - sy) < 1e-6
+                next_is_home = False
+                if pi + 1 < n_pts:
+                    nx, ny = path_pts[pi + 1]
+                    if not math.isnan(nx):
+                        next_is_home = abs(nx - sx) < 1e-6 and abs(ny - sy) < 1e-6
+                if at_home and not next_is_home:
+                    keyframes.append((t, x, y, True))
+                    t += _REFUEL_PAUSE
+                    keyframes.append((t, x, y, True))
                 else:
-                    dist = math.hypot(x - prev[0], y - prev[1])
-                    t += dist / speed
                     keyframes.append((t, x, y, False))
-                    prev = (x, y)
+                prev = (x, y)
                 pi += 1
             drone_keyframes.append(keyframes)
 
@@ -860,11 +779,23 @@ class MissionVisualizer:
                 zorder=6,
             )
             (trail,) = ax.plot(
-                [], [], "-", color=color, linewidth=2.0, alpha=0.92, zorder=6,
-                solid_capstyle="round", solid_joinstyle="round",
+                [],
+                [],
+                "-",
+                color=color,
+                linewidth=2.0,
+                alpha=0.92,
+                zorder=6,
+                solid_capstyle="round",
+                solid_joinstyle="round",
             )
             (rth_trail,) = ax.plot(
-                [], [], color=color, linewidth=1.7, alpha=0.72, zorder=5,
+                [],
+                [],
+                color=color,
+                linewidth=1.7,
+                alpha=0.72,
+                zorder=5,
                 linestyle=_RTH_DASH,
             )
             drone_markers.append(marker)
@@ -922,10 +853,14 @@ class MissionVisualizer:
                     marker.set_markersize(12)
                     marker.set_alpha(1.0)
 
-                active = rth_trail_data[idx] if is_rth else trail_data[idx]
-                passive = trail_data[idx] if is_rth else rth_trail_data[idx]
+                if is_rth:
+                    active = rth_trail_data[idx]
+                    passive = trail_data[idx]
+                else:
+                    active = trail_data[idx]
+                    passive = rth_trail_data[idx]
 
-                if active["x"]:
+                if active["x"] and not math.isnan(active["x"][-1]):
                     lx, ly = active["x"][-1], active["y"][-1]
                     if math.hypot(px - lx, py - ly) < 1e-6:
                         active["x"].append(float("nan"))
@@ -959,8 +894,6 @@ class MissionVisualizer:
                     )
 
             anim.save(save_path, fps=int(fps), progress_callback=_progress)
-            print(f"\r[video] [####################] 100.0%  ({n_frames}/{n_frames})")
-            print(f"[video] done → {save_path}")
 
         plt.tight_layout()
         return anim

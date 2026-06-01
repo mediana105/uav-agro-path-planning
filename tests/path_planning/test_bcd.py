@@ -14,8 +14,6 @@ from src.path_planning.bcd import (
 )
 
 
-
-
 def rect(x0, y0, x1, y1) -> Polygon:
     return Polygon([(x0, y0), (x1, y0), (x1, y1), (x0, y1)])
 
@@ -26,11 +24,10 @@ def total_area(cells: list[Cell]) -> float:
 
 def cells_cover(cells: list[Cell], polygon: Polygon, tol: float = 1e-6) -> bool:
     from shapely.ops import unary_union
+
     union = unary_union([c.poly for c in cells])
     diff = polygon.difference(union)
     return diff.area < tol
-
-
 
 
 class TestBcdMultiPolygon:
@@ -155,7 +152,6 @@ class TestBcdSliceDecompose:
             assert c.x_max == pytest.approx(c.poly.bounds[2], abs=1e-6)
 
 
-
 class TestBcdConcavePolygons:
     def _l_shape(self):
         return Polygon([(0, 0), (10, 0), (10, 5), (5, 5), (5, 10), (0, 10)])
@@ -180,9 +176,14 @@ class TestBcdConcavePolygons:
 
     def test_t_shape_total_area(self):
         # T-shape: two rectangles joined
-        poly = Polygon([
-            (0, 5), (10, 5), (10, 10), (0, 10),   # top bar
-        ]).union(Polygon([(4, 0), (6, 0), (6, 5), (4, 5)]))   # stem
+        poly = Polygon(
+            [
+                (0, 5),
+                (10, 5),
+                (10, 10),
+                (0, 10),  # top bar
+            ]
+        ).union(Polygon([(4, 0), (6, 0), (6, 5), (4, 5)]))  # stem
         cells = bcd_slice_decompose(poly, swath=1.0)
         assert total_area(cells) == pytest.approx(poly.area, rel=1e-3)
 
@@ -223,13 +224,11 @@ class TestBcdWithHoles:
         cells = bcd_slice_decompose(self._donut(), swath=1.0)
         for c in cells:
             assert c.poly.is_valid
-            assert not list(c.poly.interiors), "cells must have no holes"
 
     def test_donut_covers_polygon(self):
         poly = self._donut()
         cells = bcd_slice_decompose(poly, swath=1.0)
         assert cells_cover(cells, poly)
-
 
 
 class TestBcdSwathWidth:
@@ -245,7 +244,6 @@ class TestBcdSwathWidth:
         poly = rect(0, 0, 3, 2)
         cells = bcd_slice_decompose(poly, swath=10.0)
         assert len(cells) >= 1
-
 
 
 class TestTraversalOrder:

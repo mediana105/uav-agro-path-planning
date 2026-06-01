@@ -1,6 +1,9 @@
 import math
 
-from ..path_planning.boustrophedon import generate_boustrophedon_coverage, path_length
+from ..path_planning.coverage_path import build_zone_snake
+from ..path_planning import utils as _pp_utils
+
+path_length = _pp_utils.path_length
 
 
 def find_angle_by_bruteforce(
@@ -16,7 +19,7 @@ def find_angle_by_bruteforce(
     angle = angle_min
 
     while angle < angle_max:
-        path = generate_boustrophedon_coverage(polygon, swath, math.radians(angle))
+        path, _, _ = build_zone_snake(polygon, swath, angle_rad=math.radians(angle))
 
         if len(path) < 2:
             angle += step_deg

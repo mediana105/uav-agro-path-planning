@@ -10,10 +10,10 @@ class JointOptimizer:
         self.n_drones = mission_optimizer.num_drones
         self._last_result: MissionResult | None = None
         self._last_portions: list[float] | None = None
-        self._cache: dict[tuple[float, ...], float] = {}  # хэш порций -> mission_time
+        self._cache: dict[tuple[float, ...], float] = {}
 
     def objective(self, portions: list[float]) -> float:
-        key = tuple(round(p, 6) for p in portions)  # округление для устойчивости
+        key = tuple(round(p, 6) for p in portions)
         if key in self._cache:
             return self._cache[key]
         result = self.mission_optimizer.evaluate(portions)
@@ -27,16 +27,13 @@ class JointOptimizer:
         self,
         initial_portions: list[float] = None,
         algorithm: str = "sa",
-        # SA parameters
         initial_temp: float = 1000.0,
         final_temp: float = 1e-10,
         step_size: float = 0.1,
-        # Tabu Search parameters
         tabu_tenure: int = 15,
         num_neighbors: int = 5,
         tabu_step_size: float = 0.05,
         tabu_epsilon: float = 1e-3,
-        # Common
         max_iterations: int = 1000,
         seed: int | None = None,
         iteration_callback: Any | None = None,
